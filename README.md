@@ -8,8 +8,20 @@
 
 ## 训练
 
+> `trainer.py` 的第一个位置参数是**策略输出文件路径**，训练结束后会保存到该文件。
+
 ```bash
-python trainer.py policy.pth \
+mkdir -p checkpoints
+python trainer.py checkpoints/policy.pth \
+  --model-type gnn \
+  --search-algorithm sa
+```
+
+如果希望在已有策略上继续训练，可使用：
+
+```bash
+python trainer.py checkpoints/policy_v2.pth \
+  --input checkpoints/policy.pth \
   --model-type gnn \
   --search-algorithm sa
 ```
