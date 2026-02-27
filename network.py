@@ -89,7 +89,7 @@ class CriticNetwork(nn.Module):
         super().__init__()
         self.node_model = NodeNetwork(node_features)
         self.col_model = ColNetwork(col_features)
-        self.fc = nn.Linear(25, 16)  # 修改输入维度为25（根据实际输入维度调整）
+        self.fc = nn.Linear(2, 16)
         self.out_layer = nn.Linear(16, 1)  # 最终输出层
         self.device = device
 
@@ -107,28 +107,23 @@ class CriticNetwork(nn.Module):
         # 使用GNN处理节点特征
         node_features = self.node_model((obs["node_features"], edge_index))
         col_features = self.col_model(obs["col_features"])
-        print('node_features.shape',node_features.shape,'col_features.shape', col_features.shape)
         
         # 调整维度并合并特征
         node_features = node_features.squeeze(-1)  # 移除最后一个维度
         col_features = col_features.squeeze(-1)  # 移除最后一个维度
-        print('node_features.shape',node_features.shape,'col_features.shape', col_features.shape)
         
         # 分别计算平均值并确保维度一致
         node_avg = node_features.mean(1)  # 对节点维度取平均
         col_avg = col_features.mean(1)    # 对列维度取平均
-        print('node_avg.shape',node_avg.shape,'col_avg.shape', col_avg.shape)
         
         # 确保两个张量都是2维的 [batch_size, features]
         if node_avg.dim() == 1:
             node_avg = node_avg.unsqueeze(-1)
         if col_avg.dim() == 1:
             col_avg = col_avg.unsqueeze(-1)
-        print('node_avg.shape',node_avg.shape,'col_avg.shape', col_avg.shape)
             
         # 拼接特征
         combined = torch.cat([node_avg, col_avg], dim=1)  # 在特征维度上拼接
-        print('combined.shape',combined.shape)
         
         # 通过额外的全连接层
         x = torch.relu(self.fc(combined))

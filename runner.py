@@ -58,12 +58,12 @@ def calculate_score(graph, solution):
     return conflicts
 
 def get_conflict_edges(graph, coloring):
-    if solution is None:
-        return float("inf")
+    if coloring is None:
+        return []
     conflict_edges = []
     for u, v in graph.edges():
-        if solution[u] == solution[v]:
-            conflict_edges.append((u,v))
+        if coloring[u] == coloring[v]:
+            conflict_edges.append((u, v))
     return conflict_edges
 
 class RandomGCPPolicy(BasePolicy):

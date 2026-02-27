@@ -31,7 +31,14 @@ class GcpEnv(gym.Env):
         self._k = k
         self._adj_matrix = nx.to_numpy_array(graph, dtype=np.int32)
         self._adj_list = [list(self._graph.neighbors(node)) for node in range(len(self._graph))]
-        self._edge_list = self._graph.edges
+        # 预先构建双向edge_index，形状为(2, num_edges*2)
+        edges = np.array(list(self._graph.edges), dtype=np.int64)
+        if len(edges) == 0:
+            self._edge_index = np.zeros((2, 0), dtype=np.int64)
+        else:
+            reverse_edges = edges[:, ::-1]
+            bidirectional_edges = np.vstack([edges, reverse_edges])
+            self._edge_index = bidirectional_edges.T
         self._max_episode_steps_RL = max_episode_steps_RL
         self._max_episode_steps = max_episode_steps
         
@@ -130,7 +137,7 @@ class GcpEnv(gym.Env):
                 ]
         
         return {
-            "edge_index":self._edge_list,
+            "edge_index": self._edge_index,
             "node_features": node_features,
             "col_features": col_features,
             "k": self._k
