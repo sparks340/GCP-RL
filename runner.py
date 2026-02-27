@@ -5,13 +5,7 @@ import sys
 import networkx as nx
 import numpy as np
 import torch
-from tianshou.data import Collector
-from tianshou.env import DummyVectorEnv
-from tianshou.policy import BasePolicy
-from tianshou.utils.net.common import ActorCritic
 
-from gcp_env import GcpEnv
-from network import ActorNetwork, CriticNetwork, GCPPPOPolicy
 from simulated_annealing import SimulatedAnnealingSolver
 from tabu_search import TabuSearchSolver
 
@@ -57,16 +51,6 @@ def get_conflict_edges(graph, coloring):
     if coloring is None:
         return []
     return [(u, v) for (u, v) in graph.edges() if coloring[u] == coloring[v]]
-
-
-class RandomGCPPolicy(BasePolicy):
-    def __init__(self, action_space):
-        super().__init__()
-        self.action_space = action_space
-
-    def forward(self, batch, state=None, **kwargs):
-        action = np.array([self.action_space.sample()])
-        return type("Obj", (), {"act": action})
 
 
 def run_no_rl(graph, colors, search_algorithm, sa_iters, initial_temp, cooling_rate, min_temp, tabu_iters, tabu_tenure):
@@ -129,6 +113,13 @@ if __name__ == "__main__":
     else:
         if not args.input:
             raise ValueError("RL模式必须提供 --input 策略文件路径")
+
+        from tianshou.data import Collector
+        from tianshou.env import DummyVectorEnv
+        from tianshou.utils.net.common import ActorCritic
+
+        from gcp_env import GcpEnv
+        from network import ActorNetwork, CriticNetwork, GCPPPOPolicy
 
         env = GcpEnv(
             graph=graph,
