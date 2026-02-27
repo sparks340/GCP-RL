@@ -1,14 +1,15 @@
-from torch import nn
+from typing import Any, Optional, Type, Union
+
+import numpy as np
 import torch
-from tianshou.policy.modelfree.ppo import PPOPolicy
-from typing import Any, Optional, Union, Type
+from torch import nn
 from tianshou.data import Batch
 from tianshou.data.buffer.base import ReplayBuffer
-import numpy as np
+from tianshou.policy.modelfree.ppo import PPOPolicy
+from torch_geometric.nn import GCNConv
 
-from torch_geometric.nn import GCNConv  
 
-class NodeNetwork(nn.Module):
+class GNNNodeNetwork(nn.Module):
     def __init__(self, input_size):
         super().__init__()
         self.conv1 = GCNConv(input_size, 16)
@@ -16,20 +17,31 @@ class NodeNetwork(nn.Module):
         self.fc = nn.Linear(16, 1)
 
     def forward(self, data_tuple):
-        # x shape: (batch_size, num_nodes, input_size)
-        # edge_index shape: (2, num_edges)
-
         x, edge_index = data_tuple
-        
-        # 处理图结构
         batch_size, num_nodes, _ = x.shape
-        x = x.view(-1, x.size(-1))  # 
+        x = x.view(-1, x.size(-1))
         edge_index = edge_index.expand(batch_size, *edge_index.shape).reshape(2, -1)
-        
         x = torch.relu(self.conv1(x, edge_index))
         x = torch.relu(self.conv2(x, edge_index))
-        x = x.view(batch_size, num_nodes, -1)  
-        return self.fc(x)  
+        x = x.view(batch_size, num_nodes, -1)
+        return self.fc(x)
+
+
+class MLPNodeNetwork(nn.Module):
+    def __init__(self, input_size):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_size, 32),
+            nn.ReLU(),
+            nn.Linear(32, 16),
+            nn.ReLU(),
+            nn.Linear(16, 1),
+        )
+
+    def forward(self, data_tuple):
+        x, _ = data_tuple
+        return self.network(x)
+
 
 class ColNetwork(nn.Module):
     def __init__(self, input_size):
@@ -37,97 +49,65 @@ class ColNetwork(nn.Module):
         self.network = nn.Sequential(
             nn.Linear(input_size, 16),
             nn.ReLU(),
-            nn.Linear(16, 1)
+            nn.Linear(16, 1),
         )
 
     def forward(self, x):
         return self.network(x)
 
+
 class ActorNetwork(nn.Module):
-    def __init__(self, node_features, col_features, device="cpu"):
+    def __init__(self, node_features, col_features, device="cpu", use_gnn=True):
         super().__init__()
-        self.node_model = nn.Sequential(
-            NodeNetwork(node_features),
-            nn.Softmax(dim=1),
-        )
-        self.col_model = nn.Sequential(
-            ColNetwork(col_features),
-            nn.Softmax(dim=2),
-        )
+        node_backbone = GNNNodeNetwork(node_features) if use_gnn else MLPNodeNetwork(node_features)
+        self.node_model = nn.Sequential(node_backbone, nn.Softmax(dim=1))
+        self.col_model = nn.Sequential(ColNetwork(col_features), nn.Softmax(dim=2))
         self.device = device
 
-    def forward(self, obs, state=None, info={}):
-        # 添加edge_index到观测数据中
-        obs["node_features"] = torch.as_tensor(
-            obs["node_features"], device=self.device, dtype=torch.float32
-        )
-        obs["col_features"] = torch.as_tensor(
-            obs["col_features"], device=self.device, dtype=torch.float32
-        )
-        edge_index = torch.as_tensor(
-            obs["edge_index"], device=self.device, dtype=torch.long
-        )
+    def forward(self, obs, state=None, info=None):
+        obs["node_features"] = torch.as_tensor(obs["node_features"], device=self.device, dtype=torch.float32)
+        obs["col_features"] = torch.as_tensor(obs["col_features"], device=self.device, dtype=torch.float32)
+        edge_index = torch.as_tensor(obs["edge_index"], device=self.device, dtype=torch.long)
 
-        # 使用GNN处理节点特征
-        node_probs = torch.squeeze(
-            self.node_model((obs["node_features"], edge_index)), -1
-        )
+        node_probs = torch.squeeze(self.node_model((obs["node_features"], edge_index)), -1)
         col_probs = torch.squeeze(self.col_model(obs["col_features"]), -1)
 
-        return (
-            torch.flatten(
-                torch.transpose(
-                    (torch.transpose(col_probs, -1, -2) * node_probs[:, None]), -1, -2
-                ),
-                start_dim=1,
-            ),
-            state,
+        logits = torch.flatten(
+            torch.transpose((torch.transpose(col_probs, -1, -2) * node_probs[:, None]), -1, -2),
+            start_dim=1,
         )
+        return logits, state
+
 
 class CriticNetwork(nn.Module):
-    def __init__(self, node_features, col_features, device="cpu"):
+    def __init__(self, node_features, col_features, device="cpu", use_gnn=True):
         super().__init__()
-        self.node_model = NodeNetwork(node_features)
+        self.node_model = GNNNodeNetwork(node_features) if use_gnn else MLPNodeNetwork(node_features)
         self.col_model = ColNetwork(col_features)
         self.fc = nn.Linear(2, 16)
-        self.out_layer = nn.Linear(16, 1)  # 最终输出层
+        self.out_layer = nn.Linear(16, 1)
         self.device = device
 
     def forward(self, obs, **kwargs):
-        obs["node_features"] = torch.as_tensor(
-            obs["node_features"], device=self.device, dtype=torch.float32
-        )
-        obs["col_features"] = torch.as_tensor(
-            obs["col_features"], device=self.device, dtype=torch.float32
-        )
-        edge_index = torch.as_tensor(
-            obs["edge_index"], device=self.device, dtype=torch.long
-        )
+        obs["node_features"] = torch.as_tensor(obs["node_features"], device=self.device, dtype=torch.float32)
+        obs["col_features"] = torch.as_tensor(obs["col_features"], device=self.device, dtype=torch.float32)
+        edge_index = torch.as_tensor(obs["edge_index"], device=self.device, dtype=torch.long)
 
-        # 使用GNN处理节点特征
-        node_features = self.node_model((obs["node_features"], edge_index))
-        col_features = self.col_model(obs["col_features"])
-        
-        # 调整维度并合并特征
-        node_features = node_features.squeeze(-1)  # 移除最后一个维度
-        col_features = col_features.squeeze(-1)  # 移除最后一个维度
-        
-        # 分别计算平均值并确保维度一致
-        node_avg = node_features.mean(1)  # 对节点维度取平均
-        col_avg = col_features.mean(1)    # 对列维度取平均
-        
-        # 确保两个张量都是2维的 [batch_size, features]
+        node_features = self.node_model((obs["node_features"], edge_index)).squeeze(-1)
+        col_features = self.col_model(obs["col_features"]).squeeze(-1)
+
+        node_avg = node_features.mean(1)
+        col_avg = col_features.mean(1)
+
         if node_avg.dim() == 1:
             node_avg = node_avg.unsqueeze(-1)
         if col_avg.dim() == 1:
             col_avg = col_avg.unsqueeze(-1)
-            
-        # 拼接特征
-        combined = torch.cat([node_avg, col_avg], dim=1)  # 在特征维度上拼接
-        
-        # 通过额外的全连接层
+
+        combined = torch.cat([node_avg, col_avg], dim=1)
         x = torch.relu(self.fc(combined))
         return self.out_layer(x)
+
 
 class GCPPPOPolicy(PPOPolicy):
     def __init__(
@@ -144,7 +124,7 @@ class GCPPPOPolicy(PPOPolicy):
         value_clip: bool = False,
         advantage_normalization: bool = True,
         recompute_advantage: bool = False,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> None:
         self.k = k
         self.n = nodes
@@ -166,7 +146,7 @@ class GCPPPOPolicy(PPOPolicy):
             dual_clip=dual_clip,
             advantage_normalization=advantage_normalization,
             recompute_advantage=recompute_advantage,
-            **kwargs
+            **kwargs,
         )
 
     def map_action(self, act: Union[Batch, np.ndarray]) -> Union[Batch, np.ndarray]:
@@ -174,10 +154,10 @@ class GCPPPOPolicy(PPOPolicy):
             node = x // self.k
             col = x % self.k
             return np.array([node, col])
-        
+
         if isinstance(act, Batch):
             return Batch(act=np.array([mapper(x) for x in act.act]))
         return np.array([mapper(x) for x in act])
 
     def process_fn(self, batch: Batch, buffer: ReplayBuffer, indices: np.ndarray) -> Batch:
-        return super().process_fn(batch, buffer, indices) 
+        return super().process_fn(batch, buffer, indices)
