@@ -35,3 +35,14 @@ python runner.py test_graph.txt --ablation no_rl --search-algorithm tabu --tabu-
 ```
 
 输出可通过 `--output result.json` 保存。
+
+
+## 环境准备（最小依赖）
+
+```bash
+pip install -r requirements.txt
+python scripts/check_env.py
+```
+
+- `requirements.txt`：项目最小运行依赖清单。
+- `scripts/check_env.py`：一键检查 Python/依赖版本与缺失项。
