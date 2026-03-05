@@ -18,9 +18,10 @@ python scripts/check_env.py
 
 ## 2. 训练策略
 
-`trainer.py` 的第一个位置参数是输出模型路径（`.pth`）。
+> `trainer.py` 的第一个位置参数是**策略输出文件路径**，训练结束后会保存到该文件。
 
 ```bash
+mkdir -p checkpoints
 python trainer.py checkpoints/policy.pth \
   --model-type gnn \
   --search-algorithm sa
