@@ -187,9 +187,13 @@ class GcpEnv(gym.Env):
         truncated = self._step >= self._max_episode_steps
 
         return self._get_obs(), float(reward), terminated, truncated, {
+            "step": self._step,
             "best_solution": self._best_solution,
             "conflicts": new_score,
             "best_conflicts": self._best_score,
+            "immediate_reward": float(immediate_reward),
+            "search_reward": float(search_reward),
+            "total_reward": float(reward),
         }
 
     def get_graph(self):

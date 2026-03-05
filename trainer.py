@@ -4,9 +4,10 @@ import time
 
 import gymnasium as gym
 import networkx as nx
+import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from tianshou.data import Collector, VectorReplayBuffer
+from tianshou.data import Batch, Collector, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
 from tianshou.trainer import OnpolicyTrainer
 from tianshou.utils import TensorboardLogger
@@ -16,29 +17,79 @@ from gcp_env.gcp_env import GcpEnv
 from network import ActorNetwork, CriticNetwork, GCPPPOPolicy
 
 
+def run_eval_episode(eval_env, policy):
+    obs, _ = eval_env.reset()
+    total_reward = 0.0
+    history = []
+    terminated = False
+    truncated = False
+
+    while not (terminated or truncated):
+        batched_obs = {
+            "edge_index": np.expand_dims(obs["edge_index"], axis=0),
+            "node_features": np.expand_dims(obs["node_features"], axis=0),
+            "col_features": np.expand_dims(obs["col_features"], axis=0),
+            "k": np.array([obs["k"]], dtype=np.int64),
+        }
+        batch = Batch(obs=batched_obs, info={})
+        with torch.no_grad():
+            result = policy(batch)
+
+        logits = result.logits
+        if isinstance(logits, torch.Tensor):
+            action = int(torch.argmax(logits, dim=-1).detach().cpu().numpy()[0])
+        else:
+            action = int(np.asarray(result.act)[0])
+
+        mapped_action = policy.map_action(np.array([action]))[0]
+        obs, reward, terminated, truncated, info = eval_env.step(mapped_action)
+
+        entropy = 0.0
+        if hasattr(result, "dist") and result.dist is not None:
+            entropy_tensor = result.dist.entropy()
+            if isinstance(entropy_tensor, torch.Tensor):
+                entropy = float(entropy_tensor.mean().item())
+            else:
+                entropy = float(np.mean(entropy_tensor))
+
+        history.append(
+            {
+                "conflicts": float(info.get("conflicts", 0.0)),
+                "best_conflicts": float(info.get("best_conflicts", 0.0)),
+                "immediate_reward": float(info.get("immediate_reward", 0.0)),
+                "search_reward": float(info.get("search_reward", 0.0)),
+                "total_reward": float(info.get("total_reward", reward)),
+                "entropy": entropy,
+            }
+        )
+        total_reward += float(reward)
+
+    return history, total_reward
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="基于强化学习的图着色训练器（支持SA/Tabu与GNN消融）")
-    parser.add_argument("output", type=str, help="策略输出文件路径")
-    parser.add_argument("--input", type=str, default=None, help="策略输入文件路径")
-    parser.add_argument("-I", "--max_steps_RL", type=int, default=300, help="每个episode的RL最大步数")
-    parser.add_argument("-L", "--max-steps", type=int, dest="max_steps", default=320, help="每个episode的最大步数")
+    parser = argparse.ArgumentParser(description="PPO trainer for graph coloring")
+    parser.add_argument("output", type=str, help="Path to output policy file")
+    parser.add_argument("--input", type=str, default=None, help="Path to input policy file")
+    parser.add_argument("-I", "--max_steps_RL", type=int, default=300, help="Max RL steps in each episode")
+    parser.add_argument("-L", "--max-steps", type=int, dest="max_steps", default=320, help="Max total steps in each episode")
 
-    parser.add_argument("-S", "--sa-iters", type=int, default=500000, help="模拟退火迭代次数")
-    parser.add_argument("-T", "--initial-temp", type=float, default=500.0, help="模拟退火初始温度")
-    parser.add_argument("-C", "--cooling-rate", type=float, default=0.995, help="模拟退火冷却率")
-    parser.add_argument("-M", "--min-temp", type=float, default=0.01, help="模拟退火最小温度")
+    parser.add_argument("-S", "--sa-iters", type=int, default=500000, help="SA iterations")
+    parser.add_argument("-T", "--initial-temp", type=float, default=500.0, help="SA initial temperature")
+    parser.add_argument("-C", "--cooling-rate", type=float, default=0.995, help="SA cooling rate")
+    parser.add_argument("-M", "--min-temp", type=float, default=0.01, help="SA minimum temperature")
 
-    parser.add_argument("--tabu-iters", type=int, default=5000, help="禁忌搜索迭代次数")
-    parser.add_argument("--tabu-tenure", type=int, default=20, help="禁忌长度")
-    parser.add_argument("--search-algorithm", choices=["sa", "tabu"], default="sa", help="RL后的局部搜索算法")
+    parser.add_argument("--tabu-iters", type=int, default=5000, help="Tabu search iterations")
+    parser.add_argument("--tabu-tenure", type=int, default=20, help="Tabu tenure")
+    parser.add_argument("--search-algorithm", choices=["sa", "tabu"], default="sa", help="Local search algorithm")
 
-    parser.add_argument("--model-type", choices=["gnn", "mlp"], default="gnn", help="策略网络结构（用于GNN消融）")
+    parser.add_argument("--model-type", choices=["gnn", "mlp"], default="gnn", help="Policy network type")
 
-    parser.add_argument("-E", "--epochs", type=int, default=50, help="训练轮数")
-    parser.add_argument("-N", "--nodes", type=int, default=250, help="训练图节点数")
-    parser.add_argument("-P", "--probability", type=float, default=0.5, help="随机图边概率")
-    parser.add_argument("-K", "--colors", type=int, default=24, help="颜色数")
-    parser.add_argument("-B", "--beta", type=float, default=0.2, help="奖励中的局部搜索权重")
+    parser.add_argument("-E", "--epochs", type=int, default=50, help="Training epochs")
+    parser.add_argument("-N", "--nodes", type=int, default=250, help="Training graph node count")
+    parser.add_argument("-P", "--probability", type=float, default=0.5, help="Erdos-Renyi edge probability")
+    parser.add_argument("-K", "--colors", type=int, default=24, help="Number of colors")
+    parser.add_argument("-B", "--beta", type=float, default=0.2, help="Local search reward weight")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps)
@@ -64,6 +115,7 @@ if __name__ == "__main__":
     env = build_env()
     train_envs = DummyVectorEnv([build_env for _ in range(1)])
     test_envs = DummyVectorEnv([build_env for _ in range(1)])
+    eval_env = build_env()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     use_gnn = args.model_type == "gnn"
@@ -89,7 +141,7 @@ if __name__ == "__main__":
     )
 
     if args.input:
-        print(f"加载策略: {args.input}")
+        print(f"Loading policy: {args.input}")
         policy.load_state_dict(torch.load(args.input, map_location=device))
         sys.stdout.flush()
 
@@ -103,12 +155,33 @@ if __name__ == "__main__":
     )
     writer = SummaryWriter(log_path)
     writer.add_text(
-        "参数配置",
+        "config",
         f"nodes={args.nodes}\ncolors={args.colors}\nepochs={args.epochs}\n"
         f"model_type={args.model_type}\nsearch_algorithm={args.search_algorithm}\n"
         f"sa_iters={args.sa_iters}\ntabu_iters={args.tabu_iters}\nbeta={args.beta}",
     )
     logger = TensorboardLogger(writer, train_interval=1, update_interval=1)
+
+    def test_fn(epoch, env_step):
+        history, episode_reward = run_eval_episode(eval_env, policy)
+        if not history:
+            return
+
+        conflicts = np.array([item["conflicts"] for item in history], dtype=np.float32)
+        best_conflicts = np.array([item["best_conflicts"] for item in history], dtype=np.float32)
+        immediate_rewards = np.array([item["immediate_reward"] for item in history], dtype=np.float32)
+        search_rewards = np.array([item["search_reward"] for item in history], dtype=np.float32)
+        total_rewards = np.array([item["total_reward"] for item in history], dtype=np.float32)
+        entropies = np.array([item["entropy"] for item in history], dtype=np.float32)
+
+        writer.add_scalar("eval/final_conflicts", float(conflicts[-1]), global_step=env_step)
+        writer.add_scalar("eval/best_conflicts", float(best_conflicts.min()), global_step=env_step)
+        writer.add_scalar("eval/episode_len", len(history), global_step=env_step)
+        writer.add_scalar("eval/episode_reward", float(episode_reward), global_step=env_step)
+        writer.add_scalar("eval/immediate_reward_mean", float(immediate_rewards.mean()), global_step=env_step)
+        writer.add_scalar("eval/search_reward_mean", float(search_rewards.mean()), global_step=env_step)
+        writer.add_scalar("eval/total_reward_mean", float(total_rewards.mean()), global_step=env_step)
+        writer.add_scalar("eval/action_entropy_mean", float(entropies.mean()), global_step=env_step)
 
     trainer = OnpolicyTrainer(
         policy=policy,
@@ -121,11 +194,12 @@ if __name__ == "__main__":
         batch_size=128,
         step_per_collect=500,
         logger=logger,
+        test_fn=test_fn,
     )
 
-    print("开始训练...")
+    print("Start training...")
     sys.stdout.flush()
     result = trainer.run()
-    print(f"训练完成: {result}")
+    print(f"Training finished: {result}")
     torch.save(policy.state_dict(), args.output)
     writer.close()
