@@ -276,7 +276,7 @@ if __name__ == "__main__":
             actor=actor,
             critic=critic,
             optim=optim,
-            dist_fn=torch.distributions.Categorical,
+            dist_fn=lambda logits: torch.distributions.Categorical(logits=logits),
             nodes=n,
             k=args.colors,
             action_space=env.action_space,
