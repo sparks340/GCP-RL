@@ -100,6 +100,10 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--vf-coef", type=float, default=0.25, help="Value loss coefficient")
     parser.add_argument("--ent-coef", type=float, default=0.005, help="Entropy bonus coefficient")
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto", help="Training device selection")
+    parser.add_argument("--split-gpus", action="store_true", help="Split actor/critic across cuda:0 and cuda:1 when available")
+    parser.add_argument("--actor-device", type=str, default=None, help="Override actor device, e.g. cuda:0")
+    parser.add_argument("--critic-device", type=str, default=None, help="Override critic device, e.g. cuda:1")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps)
@@ -128,11 +132,41 @@ if __name__ == "__main__":
     test_envs = DummyVectorEnv([build_env for _ in range(args.test_env_num)])
     eval_env = build_env()
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if args.device == "cpu":
+        actor_device = torch.device("cpu")
+        critic_device = torch.device("cpu")
+    elif args.device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("--device cuda was requested, but CUDA is not available")
+    elif not torch.cuda.is_available():
+        actor_device = torch.device("cpu")
+        critic_device = torch.device("cpu")
+    else:
+        gpu_count = torch.cuda.device_count()
+        if args.actor_device:
+            actor_device = torch.device(args.actor_device)
+        else:
+            actor_device = torch.device("cuda:0")
+
+        if args.critic_device:
+            critic_device = torch.device(args.critic_device)
+        elif args.split_gpus and gpu_count >= 2:
+            critic_device = torch.device("cuda:1")
+        else:
+            critic_device = actor_device
+
     use_gnn = args.model_type == "gnn"
 
-    actor = ActorNetwork(3, 3, device=device, use_gnn=use_gnn).to(device)
-    critic = CriticNetwork(3, 3, device=device, use_gnn=use_gnn).to(device)
+    print(f"Using actor_device={actor_device}, critic_device={critic_device}")
+    sys.stdout.flush()
+
+    actor = ActorNetwork(3, 3, device=actor_device, use_gnn=use_gnn).to(actor_device)
+    critic = CriticNetwork(
+        3,
+        3,
+        device=critic_device,
+        output_device=actor_device,
+        use_gnn=use_gnn,
+    ).to(critic_device)
     actor_critic = ActorCritic(actor, critic)
     optim = torch.optim.Adam(actor_critic.parameters(), lr=args.lr)
 
@@ -155,7 +189,7 @@ if __name__ == "__main__":
 
     if args.input:
         print(f"Loading policy: {args.input}")
-        policy.load_state_dict(torch.load(args.input, map_location=device))
+        policy.load_state_dict(torch.load(args.input, map_location=actor_device))
         sys.stdout.flush()
 
     replay_buffer = VectorReplayBuffer(20000, len(train_envs))
@@ -171,7 +205,8 @@ if __name__ == "__main__":
         "config",
         f"nodes={args.nodes}\ncolors={args.colors}\nepochs={args.epochs}\n"
         f"model_type={args.model_type}\nsearch_algorithm={args.search_algorithm}\n"
-        f"sa_iters={args.sa_iters}\ntabu_iters={args.tabu_iters}\nbeta={args.beta}",
+        f"sa_iters={args.sa_iters}\ntabu_iters={args.tabu_iters}\nbeta={args.beta}\n"
+        f"actor_device={actor_device}\ncritic_device={critic_device}",
     )
     logger = TensorboardLogger(writer, train_interval=1, update_interval=1)
 

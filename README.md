@@ -173,6 +173,38 @@ e <u> <v>
 - `tabu_search.py`：禁忌搜索
 - `test_graph.txt`：示例图数据
 
+## 8.1 T4 x2 多卡训练（分离 Actor/Critic）
+
+在 Kaggle 的 `GPU T4 x2` 环境下，可以把 Actor 放到 `cuda:0`、Critic 放到 `cuda:1`，从而分摊显存占用：
+
+```bash
+python trainer.py checkpoints/policy_t4x2.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --device cuda \
+  --split-gpus \
+  --epochs 80 \
+  --nodes 250 --probability 0.5 --colors 24 \
+  --train-env-num 8 --test-env-num 4 \
+  --step-per-epoch 5000 \
+  --step-per-collect 2000 \
+  --repeat-per-collect 10 \
+  --batch-size 256 \
+  --episode-per-test 8 \
+  --lr 3e-4 --vf-coef 0.25 --ent-coef 0.005 \
+  --max_steps_RL 300 --max-steps 320 \
+  --sa-iters 500000 --beta 0.2
+```
+
+也可以手动指定设备：
+
+```bash
+python trainer.py checkpoints/policy_t4x2_manual.pth \
+  --device cuda \
+  --actor-device cuda:0 \
+  --critic-device cuda:1
+```
+
 ## 9. 推荐训练命令（开箱即用）
 
 ### 9.1 建议的初始训练（先看是否稳定收敛）

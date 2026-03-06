@@ -93,13 +93,14 @@ class ActorNetwork(nn.Module):
 
 
 class CriticNetwork(nn.Module):
-    def __init__(self, node_features, col_features, device="cpu", use_gnn=True):
+    def __init__(self, node_features, col_features, device="cpu", output_device=None, use_gnn=True):
         super().__init__()
         self.node_model = GNNNodeNetwork(node_features) if use_gnn else MLPNodeNetwork(node_features)
         self.col_model = ColNetwork(col_features)
         self.fc = nn.Linear(2, 16)
         self.out_layer = nn.Linear(16, 1)
         self.device = device
+        self.output_device = output_device
 
     def forward(self, obs, **kwargs):
         obs["node_features"] = torch.as_tensor(obs["node_features"], device=self.device, dtype=torch.float32)
@@ -119,7 +120,10 @@ class CriticNetwork(nn.Module):
 
         combined = torch.cat([node_avg, col_avg], dim=1)
         x = torch.relu(self.fc(combined))
-        return self.out_layer(x)
+        value = self.out_layer(x)
+        if self.output_device is not None and value.device != torch.device(self.output_device):
+            value = value.to(self.output_device)
+        return value
 
 
 class GCPPPOPolicy(PPOPolicy):
