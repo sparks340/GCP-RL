@@ -222,13 +222,15 @@ class GcpEnv(gym.Env):
 
         reward = immediate_reward + self._beta * search_reward
 
-        terminated = new_score == 0
+        # Report terminal/conflict state after the optional local-search handoff.
+        final_score = self._calculate_conflicts()
+        terminated = final_score == 0
         truncated = self._step >= self._max_episode_steps
 
         return self._get_obs(), float(reward), terminated, truncated, {
             "step": self._step,
             "best_solution": self._best_solution,
-            "conflicts": new_score,
+            "conflicts": final_score,
             "best_conflicts": self._best_score,
             "immediate_reward": float(immediate_reward),
             "search_reward": float(search_reward),
