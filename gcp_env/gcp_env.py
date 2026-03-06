@@ -172,7 +172,9 @@ class GcpEnv(gym.Env):
             self._best_solution = self._solution.copy()
 
         search_reward = 0
-        if self._step >= self._max_episode_steps_RL:
+        # Local search is expensive, so run it only once when RL exploration budget is exhausted.
+        # The previous ">=" condition reran SA/Tabu at every remaining step of the episode.
+        if self._step == self._max_episode_steps_RL:
             old_search_score = self._calculate_conflicts()
             self._solution, _ = self._run_local_search()
             new_search_score = self._calculate_conflicts()
