@@ -42,10 +42,17 @@ python trainer.py checkpoints/policy_v2.pth \
 - `--search-algorithm {sa,tabu}`：RL 后接的局部搜索算法
 - `--epochs`：训练轮数（默认 50）
 - `--nodes --probability --colors`：随机图规模和颜色数
+- `--train-env-num --test-env-num`：并行环境数（建议增大以降低方差）
+- `--step-per-epoch --step-per-collect --repeat-per-collect --batch-size`：采样与更新节奏
+- `--lr --vf-coef --ent-coef`：PPO 关键优化参数
 - `--tabu-iters --tabu-tenure`：Tabu 参数
 - `--sa-iters --initial-temp --cooling-rate --min-temp`：SA 参数
 
 训练时会写入 TensorBoard 日志，其中新增 `eval/*` 指标（如 `final_conflicts`、`best_conflicts`、`action_entropy_mean`），用于观察策略质量与收敛过程。
+
+训练不稳定时，建议先把 `--step-per-epoch` 提高到 `5000~20000`，并增加 `--train-env-num`。
+若 `loss/vf` 长期远大于 `loss/clip`，可以适当降低 `--vf-coef`（如 `0.25`）；
+若策略熵几乎不变，可尝试减小 `--ent-coef` 或增大学习率。
 
 ## 3. 推理/求解
 
@@ -165,3 +172,73 @@ e <u> <v>
 - `simulated_annealing.py`：模拟退火
 - `tabu_search.py`：禁忌搜索
 - `test_graph.txt`：示例图数据
+
+## 9. 推荐训练命令（开箱即用）
+
+### 9.1 建议的初始训练（先看是否稳定收敛）
+
+```bash
+python trainer.py checkpoints/policy_init.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --epochs 80 \
+  --nodes 250 --probability 0.5 --colors 24 \
+  --train-env-num 8 --test-env-num 4 \
+  --step-per-epoch 5000 \
+  --step-per-collect 2000 \
+  --repeat-per-collect 10 \
+  --batch-size 256 \
+  --episode-per-test 8 \
+  --lr 3e-4 \
+  --vf-coef 0.25 \
+  --ent-coef 0.005 \
+  --max_steps_RL 300 --max-steps 320 \
+  --sa-iters 500000 --beta 0.2
+```
+
+### 9.2 如果训练波动大（保守稳定版）
+
+```bash
+python trainer.py checkpoints/policy_stable.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --epochs 100 \
+  --nodes 250 --probability 0.5 --colors 24 \
+  --train-env-num 12 --test-env-num 6 \
+  --step-per-epoch 10000 \
+  --step-per-collect 2500 \
+  --repeat-per-collect 8 \
+  --batch-size 256 \
+  --episode-per-test 10 \
+  --lr 2e-4 \
+  --vf-coef 0.15 \
+  --ent-coef 0.003 \
+  --max_steps_RL 300 --max-steps 320 \
+  --sa-iters 500000 --beta 0.2
+```
+
+### 9.3 如果学习太慢（激进探索版）
+
+```bash
+python trainer.py checkpoints/policy_fast.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --epochs 80 \
+  --nodes 250 --probability 0.5 --colors 24 \
+  --train-env-num 8 --test-env-num 4 \
+  --step-per-epoch 8000 \
+  --step-per-collect 2000 \
+  --repeat-per-collect 12 \
+  --batch-size 256 \
+  --episode-per-test 8 \
+  --lr 5e-4 \
+  --vf-coef 0.2 \
+  --ent-coef 0.007 \
+  --max_steps_RL 300 --max-steps 320 \
+  --sa-iters 500000 --beta 0.2
+```
+
+经验法则：
+- `loss/vf` 长期显著高于策略项：继续下调 `--vf-coef`（如 `0.25 -> 0.15 -> 0.1`）。
+- `loss/ent` 几乎不动且策略不进步：小幅提高 `--lr` 或降低 `--ent-coef`。
+- `test_reward` 方差过大：优先增加 `--step-per-epoch` 和 `--train-env-num`。
