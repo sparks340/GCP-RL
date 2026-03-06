@@ -205,6 +205,29 @@ python trainer.py checkpoints/policy_t4x2_manual.pth \
   --critic-device cuda:1
 ```
 
+## 8.2 多图训练模式（提升泛化）
+
+`trainer.py` 新增图采样模式参数：
+
+- `--train-graph-mode {single,multi}`：
+  - `single`（默认）：固定单图训练
+  - `multi`：每次 `reset` 采样新图训练
+- `--eval-graph-mode {single,multi}`：评估阶段是否也按 `reset` 采样新图
+- `--graph-seed`：图采样随机种子（便于复现实验）
+
+推荐泛化训练命令：
+
+```bash
+python trainer.py checkpoints/policy_multi_graph.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --train-graph-mode multi \
+  --eval-graph-mode multi \
+  --graph-seed 42 \
+  --epochs 80 \
+  --nodes 120 --probability 0.5 --colors 24
+```
+
 ## 9. 推荐训练命令（开箱即用）
 
 ### 9.1 建议的初始训练（先看是否稳定收敛）

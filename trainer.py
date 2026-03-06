@@ -67,6 +67,23 @@ def run_eval_episode(eval_env, policy):
     return history, total_reward
 
 
+def build_graph_factory(nodes, probability, seed=None, fixed_edge_count=False):
+    seed_seq = np.random.SeedSequence(seed)
+    rng = np.random.default_rng(seed_seq)
+
+    max_undirected_edges = nodes * (nodes - 1) // 2
+    target_edges = int(round(probability * max_undirected_edges))
+    target_edges = max(0, min(target_edges, max_undirected_edges))
+
+    def sample_graph():
+        graph_seed = int(rng.integers(0, 2**32 - 1, dtype=np.uint32))
+        if fixed_edge_count:
+            return nx.gnm_random_graph(nodes, target_edges, seed=graph_seed)
+        return nx.gnp_random_graph(nodes, probability, seed=graph_seed)
+
+    return sample_graph
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PPO trainer for graph coloring")
     parser.add_argument("output", type=str, help="Path to output policy file")
@@ -104,33 +121,62 @@ if __name__ == "__main__":
     parser.add_argument("--split-gpus", action="store_true", help="Split actor/critic across cuda:0 and cuda:1 when available")
     parser.add_argument("--actor-device", type=str, default=None, help="Override actor device, e.g. cuda:0")
     parser.add_argument("--critic-device", type=str, default=None, help="Override critic device, e.g. cuda:1")
+    parser.add_argument(
+        "--train-graph-mode",
+        choices=["single", "multi"],
+        default="single",
+        help="single: fixed graph for all training episodes; multi: resample a new graph each reset (with fixed edge count)",
+    )
+    parser.add_argument(
+        "--eval-graph-mode",
+        choices=["single", "multi"],
+        default="single",
+        help="single: fixed evaluation graph(s); multi: resample new graph at each evaluation reset (with fixed edge count)",
+    )
+    parser.add_argument("--graph-seed", type=int, default=None, help="Random seed for graph generation")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps)
 
     nodes, probability, colors = args.nodes, args.probability, args.colors
-    base_graph = nx.gnp_random_graph(nodes, probability)
+    use_fixed_edge_count = args.train_graph_mode == "multi" or args.eval_graph_mode == "multi"
+    graph_factory = build_graph_factory(
+        nodes,
+        probability,
+        args.graph_seed,
+        fixed_edge_count=use_fixed_edge_count,
+    )
 
-    def build_env():
-        return GcpEnv(
-            graph=base_graph.copy(),
-            k=colors,
-            sa_iters=args.sa_iters,
-            initial_temp=args.initial_temp,
-            cooling_rate=args.cooling_rate,
-            min_temp=args.min_temp,
-            tabu_iters=args.tabu_iters,
-            tabu_tenure=args.tabu_tenure,
-            search_algorithm=args.search_algorithm,
-            beta=args.beta,
-            max_episode_steps_RL=args.max_steps_RL,
-            max_episode_steps=args.max_steps,
-        )
+    env_kwargs = dict(
+        k=colors,
+        sa_iters=args.sa_iters,
+        initial_temp=args.initial_temp,
+        cooling_rate=args.cooling_rate,
+        min_temp=args.min_temp,
+        tabu_iters=args.tabu_iters,
+        tabu_tenure=args.tabu_tenure,
+        search_algorithm=args.search_algorithm,
+        beta=args.beta,
+        max_episode_steps_RL=args.max_steps_RL,
+        max_episode_steps=args.max_steps,
+    )
 
-    env = build_env()
-    train_envs = DummyVectorEnv([build_env for _ in range(args.train_env_num)])
-    test_envs = DummyVectorEnv([build_env for _ in range(args.test_env_num)])
-    eval_env = build_env()
+    base_graph = graph_factory()
+
+    def make_train_env_fn():
+        if args.train_graph_mode == "multi":
+            return GcpEnv(graph=graph_factory(), graph_sampler=graph_factory, resample_on_reset=True, **env_kwargs)
+        return GcpEnv(graph=base_graph.copy(), **env_kwargs)
+
+    def make_test_env_fn():
+        if args.eval_graph_mode == "multi":
+            return GcpEnv(graph=graph_factory(), graph_sampler=graph_factory, resample_on_reset=True, **env_kwargs)
+        return GcpEnv(graph=base_graph.copy(), **env_kwargs)
+
+    env = make_train_env_fn()
+    train_envs = DummyVectorEnv([make_train_env_fn for _ in range(args.train_env_num)])
+    test_envs = DummyVectorEnv([make_test_env_fn for _ in range(args.test_env_num)])
+    eval_env = make_test_env_fn()
 
     if args.device == "cpu":
         actor_device = torch.device("cpu")
@@ -157,6 +203,10 @@ if __name__ == "__main__":
     use_gnn = args.model_type == "gnn"
 
     print(f"Using actor_device={actor_device}, critic_device={critic_device}")
+    print(
+        f"Graph mode: train={args.train_graph_mode}, eval={args.eval_graph_mode}, "
+        f"graph_seed={args.graph_seed}, fixed_edge_count={use_fixed_edge_count}"
+    )
     sys.stdout.flush()
 
     actor = ActorNetwork(3, 3, device=actor_device, use_gnn=use_gnn).to(actor_device)
@@ -206,7 +256,9 @@ if __name__ == "__main__":
         f"nodes={args.nodes}\ncolors={args.colors}\nepochs={args.epochs}\n"
         f"model_type={args.model_type}\nsearch_algorithm={args.search_algorithm}\n"
         f"sa_iters={args.sa_iters}\ntabu_iters={args.tabu_iters}\nbeta={args.beta}\n"
-        f"actor_device={actor_device}\ncritic_device={critic_device}",
+        f"actor_device={actor_device}\ncritic_device={critic_device}\n"
+        f"train_graph_mode={args.train_graph_mode}\neval_graph_mode={args.eval_graph_mode}\n"
+        f"graph_seed={args.graph_seed}\nfixed_edge_count={use_fixed_edge_count}",
     )
     logger = TensorboardLogger(writer, train_interval=1, update_interval=1)
 
