@@ -1,8 +1,10 @@
+import random
+
 import gymnasium as gym
 import networkx as nx
 import numpy as np
 from gymnasium import spaces
-import random
+
 from simulated_annealing import SimulatedAnnealingSolver
 from tabu_search import TabuSearchSolver
 
@@ -12,8 +14,8 @@ class GcpEnv(gym.Env):
 
     def __init__(
         self,
-        graph,
-        k,
+        graph=None,
+        k=24,
         sa_iters=50000,
         initial_temp=500.0,
         cooling_rate=0.995,
@@ -27,25 +29,30 @@ class GcpEnv(gym.Env):
         sa_init=False,
         max_episode_steps_RL=300,
         max_episode_steps=1000,
+        graph_sampler=None,
+        resample_on_reset=False,
     ):
         super().__init__()
-        self._graph = graph
+        if graph is None and graph_sampler is None:
+            raise ValueError("Either graph or graph_sampler must be provided")
+
+        self._graph_sampler = graph_sampler
+        self._resample_on_reset = resample_on_reset and graph_sampler is not None
+
         self._k = k
-        self._adj_matrix = nx.to_numpy_array(graph, dtype=np.int32)
-        self._adj_list = [list(self._graph.neighbors(node)) for node in range(len(self._graph))]
-
-        edges = np.array(list(self._graph.edges), dtype=np.int64)
-        if len(edges) == 0:
-            self._edge_index = np.zeros((2, 0), dtype=np.int64)
-        else:
-            reverse_edges = edges[:, ::-1]
-            bidirectional_edges = np.vstack([edges, reverse_edges])
-            self._edge_index = bidirectional_edges.T
-
         self._max_episode_steps_RL = max_episode_steps_RL
         self._max_episode_steps = max_episode_steps
 
-        n = len(self._graph)
+        self._n = None
+        self._graph = None
+        self._adj_matrix = None
+        self._adj_list = None
+        self._edge_index = None
+
+        initial_graph = graph if graph is not None else graph_sampler()
+        self._set_graph(initial_graph)
+
+        n = self._n
         self.observation_space = spaces.Dict(
             {
                 "edge_index": spaces.Sequence(spaces.Box(0, n - 1, shape=(2,), dtype=np.int32)),
@@ -84,8 +91,38 @@ class GcpEnv(gym.Env):
         self._episode = 0
         self._step = 0
 
+    def _set_graph(self, graph):
+        n = len(graph)
+        if self._n is None:
+            self._n = n
+        elif n != self._n:
+            raise ValueError(
+                f"Graph sampler returned {n} nodes, expected fixed node count {self._n}. "
+                "Use a fixed node count for one trainer run."
+            )
+
+        self._graph = graph
+        self._adj_matrix = nx.to_numpy_array(graph, dtype=np.int32)
+        self._adj_list = [list(self._graph.neighbors(node)) for node in range(n)]
+
+        edges = np.array(list(self._graph.edges), dtype=np.int64)
+        if len(edges) == 0:
+            self._edge_index = np.zeros((2, 0), dtype=np.int64)
+        else:
+            reverse_edges = edges[:, ::-1]
+            bidirectional_edges = np.vstack([edges, reverse_edges])
+            self._edge_index = bidirectional_edges.T
+
+        if hasattr(self, "_sa_solver") and self._sa_solver is not None:
+            self._sa_solver.adj_list = self._adj_list
+        if hasattr(self, "_tabu_solver") and self._tabu_solver is not None:
+            self._tabu_solver.adj_list = self._adj_list
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+
+        if self._resample_on_reset and self._graph_sampler is not None:
+            self._set_graph(self._graph_sampler())
 
         if self._sa_init and self._search_algorithm == "sa":
             self._solution, _ = self._sa_solver.solve()
@@ -172,7 +209,9 @@ class GcpEnv(gym.Env):
             self._best_solution = self._solution.copy()
 
         search_reward = 0
-        if self._step >= self._max_episode_steps_RL:
+        # Local search is expensive, so run it only once when RL exploration budget is exhausted.
+        # The previous ">=" condition reran SA/Tabu at every remaining step of the episode.
+        if self._step == self._max_episode_steps_RL:
             old_search_score = self._calculate_conflicts()
             self._solution, _ = self._run_local_search()
             new_search_score = self._calculate_conflicts()
