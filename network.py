@@ -72,9 +72,8 @@ class ColNetwork(nn.Module):
 class ActorNetwork(nn.Module):
     def __init__(self, node_features, col_features, device="cpu", use_gnn=True):
         super().__init__()
-        node_backbone = GNNNodeNetwork(node_features) if use_gnn else MLPNodeNetwork(node_features)
-        self.node_model = nn.Sequential(node_backbone, nn.Softmax(dim=1))
-        self.col_model = nn.Sequential(ColNetwork(col_features), nn.Softmax(dim=2))
+        self.node_model = GNNNodeNetwork(node_features) if use_gnn else MLPNodeNetwork(node_features)
+        self.col_model = ColNetwork(col_features)
         self.device = device
 
     def forward(self, obs, state=None, info=None):
@@ -82,13 +81,14 @@ class ActorNetwork(nn.Module):
         obs["col_features"] = torch.as_tensor(obs["col_features"], device=self.device, dtype=torch.float32)
         edge_index = torch.as_tensor(obs["edge_index"], device=self.device, dtype=torch.long)
 
-        node_probs = torch.squeeze(self.node_model((obs["node_features"], edge_index)), -1)
-        col_probs = torch.squeeze(self.col_model(obs["col_features"]), -1)
+        node_logits = torch.squeeze(self.node_model((obs["node_features"], edge_index)), -1)
+        col_logits = torch.squeeze(self.col_model(obs["col_features"]), -1)
 
-        logits = torch.flatten(
-            torch.transpose((torch.transpose(col_probs, -1, -2) * node_probs[:, None]), -1, -2),
-            start_dim=1,
-        )
+        # Factorized action logits: (node, color) logit = node_logit + color_logit.
+        # Keeping logits (instead of pre-softmax probabilities) stabilizes PPO updates
+        # and allows torch.distributions.Categorical(logits=...) to handle normalization.
+        joint_logits = node_logits.unsqueeze(-1) + col_logits
+        logits = torch.flatten(joint_logits, start_dim=1)
         return logits, state
 
 
@@ -137,6 +137,8 @@ class GCPPPOPolicy(PPOPolicy):
         value_clip: bool = False,
         advantage_normalization: bool = True,
         recompute_advantage: bool = False,
+        vf_coef: float = 0.5,
+        ent_coef: float = 0.01,
         **kwargs: Any,
     ) -> None:
         self.k = k
@@ -151,8 +153,8 @@ class GCPPPOPolicy(PPOPolicy):
             action_bound_method="",
             discount_factor=0.99,
             eps_clip=eps_clip,
-            vf_coef=0.5,
-            ent_coef=0.01,
+            vf_coef=vf_coef,
+            ent_coef=ent_coef,
             gae_lambda=0.95,
             max_grad_norm=0.5,
             value_clip=value_clip,

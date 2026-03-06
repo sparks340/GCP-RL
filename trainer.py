@@ -86,19 +86,30 @@ if __name__ == "__main__":
     parser.add_argument("--model-type", choices=["gnn", "mlp"], default="gnn", help="Policy network type")
 
     parser.add_argument("-E", "--epochs", type=int, default=50, help="Training epochs")
+    parser.add_argument("--train-env-num", type=int, default=8, help="Number of parallel training environments")
+    parser.add_argument("--test-env-num", type=int, default=4, help="Number of parallel test environments")
+    parser.add_argument("--step-per-epoch", type=int, default=5000, help="Environment steps collected per epoch")
+    parser.add_argument("--step-per-collect", type=int, default=2000, help="Environment steps collected before each update")
+    parser.add_argument("--repeat-per-collect", type=int, default=10, help="Gradient update rounds per collection")
+    parser.add_argument("--batch-size", type=int, default=256, help="PPO minibatch size")
+    parser.add_argument("--episode-per-test", type=int, default=8, help="Evaluation episodes per epoch")
     parser.add_argument("-N", "--nodes", type=int, default=250, help="Training graph node count")
     parser.add_argument("-P", "--probability", type=float, default=0.5, help="Erdos-Renyi edge probability")
     parser.add_argument("-K", "--colors", type=int, default=24, help="Number of colors")
     parser.add_argument("-B", "--beta", type=float, default=0.2, help="Local search reward weight")
+    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
+    parser.add_argument("--vf-coef", type=float, default=0.25, help="Value loss coefficient")
+    parser.add_argument("--ent-coef", type=float, default=0.005, help="Entropy bonus coefficient")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps)
 
     nodes, probability, colors = args.nodes, args.probability, args.colors
+    base_graph = nx.gnp_random_graph(nodes, probability)
 
     def build_env():
         return GcpEnv(
-            graph=nx.gnp_random_graph(nodes, probability),
+            graph=base_graph.copy(),
             k=colors,
             sa_iters=args.sa_iters,
             initial_temp=args.initial_temp,
@@ -113,8 +124,8 @@ if __name__ == "__main__":
         )
 
     env = build_env()
-    train_envs = DummyVectorEnv([build_env for _ in range(1)])
-    test_envs = DummyVectorEnv([build_env for _ in range(1)])
+    train_envs = DummyVectorEnv([build_env for _ in range(args.train_env_num)])
+    test_envs = DummyVectorEnv([build_env for _ in range(args.test_env_num)])
     eval_env = build_env()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -123,13 +134,13 @@ if __name__ == "__main__":
     actor = ActorNetwork(3, 3, device=device, use_gnn=use_gnn).to(device)
     critic = CriticNetwork(3, 3, device=device, use_gnn=use_gnn).to(device)
     actor_critic = ActorCritic(actor, critic)
-    optim = torch.optim.Adam(actor_critic.parameters(), lr=0.0003)
+    optim = torch.optim.Adam(actor_critic.parameters(), lr=args.lr)
 
     policy = GCPPPOPolicy(
         actor=actor,
         critic=critic,
         optim=optim,
-        dist_fn=torch.distributions.Categorical,
+        dist_fn=lambda logits: torch.distributions.Categorical(logits=logits),
         nodes=nodes,
         k=colors,
         action_space=env.action_space,
@@ -138,6 +149,8 @@ if __name__ == "__main__":
         value_clip=True,
         advantage_normalization=True,
         recompute_advantage=True,
+        vf_coef=args.vf_coef,
+        ent_coef=args.ent_coef,
     )
 
     if args.input:
@@ -188,11 +201,11 @@ if __name__ == "__main__":
         train_collector=train_collector,
         test_collector=test_collector,
         max_epoch=args.epochs,
-        step_per_epoch=1000,
-        repeat_per_collect=5,
-        episode_per_test=2,
-        batch_size=128,
-        step_per_collect=500,
+        step_per_epoch=args.step_per_epoch,
+        repeat_per_collect=args.repeat_per_collect,
+        episode_per_test=args.episode_per_test,
+        batch_size=args.batch_size,
+        step_per_collect=args.step_per_collect,
         logger=logger,
         test_fn=test_fn,
     )

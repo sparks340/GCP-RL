@@ -42,10 +42,17 @@ python trainer.py checkpoints/policy_v2.pth \
 - `--search-algorithm {sa,tabu}`：RL 后接的局部搜索算法
 - `--epochs`：训练轮数（默认 50）
 - `--nodes --probability --colors`：随机图规模和颜色数
+- `--train-env-num --test-env-num`：并行环境数（建议增大以降低方差）
+- `--step-per-epoch --step-per-collect --repeat-per-collect --batch-size`：采样与更新节奏
+- `--lr --vf-coef --ent-coef`：PPO 关键优化参数
 - `--tabu-iters --tabu-tenure`：Tabu 参数
 - `--sa-iters --initial-temp --cooling-rate --min-temp`：SA 参数
 
 训练时会写入 TensorBoard 日志，其中新增 `eval/*` 指标（如 `final_conflicts`、`best_conflicts`、`action_entropy_mean`），用于观察策略质量与收敛过程。
+
+训练不稳定时，建议先把 `--step-per-epoch` 提高到 `5000~20000`，并增加 `--train-env-num`。
+若 `loss/vf` 长期远大于 `loss/clip`，可以适当降低 `--vf-coef`（如 `0.25`）；
+若策略熵几乎不变，可尝试减小 `--ent-coef` 或增大学习率。
 
 ## 3. 推理/求解
 
