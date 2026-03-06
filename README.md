@@ -172,3 +172,73 @@ e <u> <v>
 - `simulated_annealing.py`：模拟退火
 - `tabu_search.py`：禁忌搜索
 - `test_graph.txt`：示例图数据
+
+## 9. 推荐训练命令（开箱即用）
+
+### 9.1 建议的初始训练（先看是否稳定收敛）
+
+```bash
+python trainer.py checkpoints/policy_init.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --epochs 80 \
+  --nodes 250 --probability 0.5 --colors 24 \
+  --train-env-num 8 --test-env-num 4 \
+  --step-per-epoch 5000 \
+  --step-per-collect 2000 \
+  --repeat-per-collect 10 \
+  --batch-size 256 \
+  --episode-per-test 8 \
+  --lr 3e-4 \
+  --vf-coef 0.25 \
+  --ent-coef 0.005 \
+  --max_steps_RL 300 --max-steps 320 \
+  --sa-iters 500000 --beta 0.2
+```
+
+### 9.2 如果训练波动大（保守稳定版）
+
+```bash
+python trainer.py checkpoints/policy_stable.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --epochs 100 \
+  --nodes 250 --probability 0.5 --colors 24 \
+  --train-env-num 12 --test-env-num 6 \
+  --step-per-epoch 10000 \
+  --step-per-collect 2500 \
+  --repeat-per-collect 8 \
+  --batch-size 256 \
+  --episode-per-test 10 \
+  --lr 2e-4 \
+  --vf-coef 0.15 \
+  --ent-coef 0.003 \
+  --max_steps_RL 300 --max-steps 320 \
+  --sa-iters 500000 --beta 0.2
+```
+
+### 9.3 如果学习太慢（激进探索版）
+
+```bash
+python trainer.py checkpoints/policy_fast.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --epochs 80 \
+  --nodes 250 --probability 0.5 --colors 24 \
+  --train-env-num 8 --test-env-num 4 \
+  --step-per-epoch 8000 \
+  --step-per-collect 2000 \
+  --repeat-per-collect 12 \
+  --batch-size 256 \
+  --episode-per-test 8 \
+  --lr 5e-4 \
+  --vf-coef 0.2 \
+  --ent-coef 0.007 \
+  --max_steps_RL 300 --max-steps 320 \
+  --sa-iters 500000 --beta 0.2
+```
+
+经验法则：
+- `loss/vf` 长期显著高于策略项：继续下调 `--vf-coef`（如 `0.25 -> 0.15 -> 0.1`）。
+- `loss/ent` 几乎不动且策略不进步：小幅提高 `--lr` 或降低 `--ent-coef`。
+- `test_reward` 方差过大：优先增加 `--step-per-epoch` 和 `--train-env-num`。
