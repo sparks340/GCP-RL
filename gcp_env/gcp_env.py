@@ -122,7 +122,10 @@ class GcpEnv(gym.Env):
 
     def _configure_k_from_graph(self):
         if self._k_sampler is not None:
-            sampled_k = int(self._k_sampler(self._n))
+            try:
+                sampled_k = int(self._k_sampler(self._n, self._graph))
+            except TypeError:
+                sampled_k = int(self._k_sampler(self._n))
             self._k = max(1, sampled_k)
         if self._k > self._max_colors:
             raise ValueError(f"Sampled k ({self._k}) exceeds max_colors ({self._max_colors})")

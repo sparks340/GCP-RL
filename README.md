@@ -52,7 +52,7 @@ python trainer.py checkpoints/policy_fixed.pth \
   --colors 24
 ```
 
-### 2) 推荐：每个 episode 随机 60~150 节点，颜色数自动 `node//5`
+### 2) 推荐：每个 episode 随机 60~150 节点，按概率使用分段颜色规则
 
 ```bash
 python trainer.py checkpoints/policy_random.pth \
@@ -63,10 +63,16 @@ python trainer.py checkpoints/policy_random.pth \
   --max-nodes 150
 ```
 
+随机图使用以下组合之一（每个 episode 随机选一条规则）：
+
+- `p=0.5` 时，`k=node//7`
+- `p=0.1` 时，`k=node//25`
+- `p=0.9` 时，`k=node//3`
+
 > 启用 `--random-nodes` 后：
 >
 > - 训练环境会在 **每个 episode reset** 时重新采样图规模（不是仅启动时采样一次）。
-> - 颜色数会按当前图规模自动设置为 `k = node // 5`（最小为 1）。
+> - 颜色数会按当前规则自动设置（`node//7`、`node//25`、`node//3`，最小为 1）。
 > - 训练图模式会自动使用 `multi`，以确保每轮都重采样。
 
 ### 3) 从已有权重继续训练
@@ -80,6 +86,12 @@ python trainer.py checkpoints/policy_v2.pth \
   --min-nodes 60 \
   --max-nodes 150
 ```
+
+随机图使用以下组合之一（每个 episode 随机选一条规则）：
+
+- `p=0.5` 时，`k=node//7`
+- `p=0.1` 时，`k=node//25`
+- `p=0.9` 时，`k=node//3`
 
 ### `trainer.py` 参数
 

@@ -85,19 +85,26 @@ def build_graph_factory(nodes, probability, seed=None, fixed_edge_count=False):
     return sample_graph
 
 
-def build_variable_graph_factory(min_nodes, max_nodes, probability, seed=None, fixed_edge_count=False):
+PROBABILITY_COLOR_RULES = (
+    (0.1, 25),
+    (0.5, 7),
+    (0.9, 3),
+)
+
+
+def build_variable_graph_factory(min_nodes, max_nodes, seed=None):
     seed_seq = np.random.SeedSequence(seed)
     rng = np.random.default_rng(seed_seq)
 
     def sample_graph():
         nodes = int(rng.integers(min_nodes, max_nodes + 1))
-        max_undirected_edges = nodes * (nodes - 1) // 2
-        target_edges = int(round(probability * max_undirected_edges))
-        target_edges = max(0, min(target_edges, max_undirected_edges))
+        rule_idx = int(rng.integers(0, len(PROBABILITY_COLOR_RULES)))
+        probability, color_divisor = PROBABILITY_COLOR_RULES[rule_idx]
         graph_seed = int(rng.integers(0, 2**32 - 1, dtype=np.uint32))
-        if fixed_edge_count:
-            return nx.gnm_random_graph(nodes, target_edges, seed=graph_seed)
-        return nx.gnp_random_graph(nodes, probability, seed=graph_seed)
+        graph = nx.gnp_random_graph(nodes, probability, seed=graph_seed)
+        graph.graph["edge_probability"] = float(probability)
+        graph.graph["color_divisor"] = int(color_divisor)
+        return graph
 
     return sample_graph
 
@@ -169,18 +176,16 @@ if __name__ == "__main__":
         args.train_graph_mode = "multi"
 
     probability = args.probability
-    use_fixed_edge_count = args.train_graph_mode == "multi" or args.eval_graph_mode == "multi"
+    use_fixed_edge_count = (args.train_graph_mode == "multi" or args.eval_graph_mode == "multi") and not args.random_nodes
 
     if args.random_nodes:
         min_nodes = args.min_nodes
         max_nodes = args.max_nodes
-        max_colors = max(1, max_nodes // 5)
+        max_colors = max(1, max_nodes // 3)
         graph_factory = build_variable_graph_factory(
             min_nodes,
             max_nodes,
-            probability,
             args.graph_seed,
-            fixed_edge_count=use_fixed_edge_count,
         )
         base_graph = graph_factory()
         nodes = max_nodes
@@ -211,7 +216,7 @@ if __name__ == "__main__":
         max_episode_steps_RL=args.max_steps_RL,
         max_nodes=max_nodes,
         max_colors=max_colors,
-        k_sampler=(lambda n: max(1, n // 5)) if args.random_nodes else None,
+        k_sampler=(lambda n, g: max(1, n // int(g.graph.get("color_divisor", 5)))) if args.random_nodes else None,
     )
 
     def make_train_env_fn():
@@ -257,7 +262,7 @@ if __name__ == "__main__":
     if args.random_nodes:
         print(
             f"Training graph size: per-episode random nodes in [{args.min_nodes}, {args.max_nodes}], "
-            f"colors=node//5 (max_colors={max_colors})"
+            f"rules: p=0.5->n//7, p=0.1->n//25, p=0.9->n//3 (max_colors={max_colors})"
         )
     else:
         print(f"Training graph size: nodes={nodes}, colors={colors} (random_nodes={args.random_nodes})")
@@ -305,7 +310,7 @@ if __name__ == "__main__":
     test_collector = Collector(policy, test_envs)
 
     node_log_name = f"{args.min_nodes}-{args.max_nodes}" if args.random_nodes else str(nodes)
-    color_log_name = "node_div_5" if args.random_nodes else str(colors)
+    color_log_name = "profiled_colors" if args.random_nodes else str(colors)
     log_path = (
         f"./log/gcp_train_{node_log_name}nodes_{color_log_name}colors_"
         f"{args.epochs}epochs_{args.model_type}_{args.search_algorithm}_{time.strftime('%Y%m%d_%H%M%S')}"
