@@ -1,33 +1,56 @@
 # GCP-RL
 
-基于强化学习（PPO）的图着色项目，支持与局部搜索结合求解：
+基于 PPO 的图着色项目，支持两种求解方式：
 
-- `RL + SA`（模拟退火）
-- `RL + Tabu`（禁忌搜索）
-- 消融模式：`no_rl`（只跑局部搜索）
-- 模型消融：`GNN` / `MLP`
+- `RL + Local Search`
+- `Local Search Only`
 
-## 1. 环境准备
+当前仓库里的局部搜索算法支持：
+
+- `sa`：模拟退火
+- `tabu`：禁忌搜索
+
+## 环境
 
 ```bash
 pip install -r requirements.txt
 python scripts/check_env.py
 ```
 
-依赖见 `requirements.txt`，核心库包括 `torch`、`tianshou`、`torch-geometric`、`networkx`、`matplotlib`。
-
-## 2. 训练策略
-
-> `trainer.py` 的第一个位置参数是**策略输出文件路径**，训练结束后会保存到该文件。
+建议使用项目虚拟环境运行命令：
 
 ```bash
-mkdir -p checkpoints
+.\.venv\Scripts\python.exe <script> ...
+```
+
+## 数据
+
+- `data/*.col`：DIMACS 格式的 DSJC 图
+- `data/ReadMe.txt`：DSJC 图对应的颜色数
+- `test_graph.txt`：单次测试用示例图
+
+输入图格式：
+
+```text
+p edge <nodes> <edges>
+e <u> <v>
+```
+
+文件中的节点编号从 `1` 开始，程序内部会转成从 `0` 开始。
+
+## 训练
+
+训练入口是 `trainer.py`，第一个位置参数是输出策略文件。
+
+示例：
+
+```bash
 python trainer.py checkpoints/policy.pth \
   --model-type gnn \
   --search-algorithm sa
 ```
 
-在已有策略上继续训练：
+继续训练：
 
 ```bash
 python trainer.py checkpoints/policy_v2.pth \
@@ -38,25 +61,22 @@ python trainer.py checkpoints/policy_v2.pth \
 
 常用参数：
 
-- `--model-type {gnn,mlp}`：策略网络结构
-- `--search-algorithm {sa,tabu}`：RL 后接的局部搜索算法
-- `--epochs`：训练轮数（默认 50）
-- `--nodes --probability --colors`：随机图规模和颜色数
-- `--train-env-num --test-env-num`：并行环境数（建议增大以降低方差）
-- `--step-per-epoch --step-per-collect --repeat-per-collect --batch-size`：采样与更新节奏
-- `--lr --vf-coef --ent-coef`：PPO 关键优化参数
-- `--tabu-iters --tabu-tenure`：Tabu 参数
-- `--sa-iters --initial-temp --cooling-rate --min-temp`：SA 参数
+- `--model-type {gnn,mlp}`
+- `--search-algorithm {sa,tabu}`
+- `--epochs`
+- `--nodes --probability --colors`
+- `--train-env-num --test-env-num`
+- `--step-per-epoch --step-per-collect --repeat-per-collect --batch-size`
+- `--lr --vf-coef --ent-coef`
+- `--sa-iters --initial-temp --cooling-rate --min-temp`
+- `--tabu-iters --tabu-tenure`
+- `--max_steps_RL --max-steps`
 
-训练时会写入 TensorBoard 日志，其中新增 `eval/*` 指标（如 `final_conflicts`、`best_conflicts`、`action_entropy_mean`），用于观察策略质量与收敛过程。
+## 单次求解
 
-训练不稳定时，建议先把 `--step-per-epoch` 提高到 `5000~20000`，并增加 `--train-env-num`。
-若 `loss/vf` 长期远大于 `loss/clip`，可以适当降低 `--vf-coef`（如 `0.25`）；
-若策略熵几乎不变，可尝试减小 `--ent-coef` 或增大学习率。
+`runner.py` 用于单张图推理。
 
-## 3. 推理/求解
-
-### 3.1 完整方案（RL + 局部搜索）
+`RL + Local Search`：
 
 ```bash
 python runner.py test_graph.txt \
@@ -66,7 +86,7 @@ python runner.py test_graph.txt \
   --search-algorithm sa
 ```
 
-### 3.2 消融：不使用 RL（只跑局部搜索）
+`Local Search Only`：
 
 ```bash
 python runner.py test_graph.txt \
@@ -76,20 +96,15 @@ python runner.py test_graph.txt \
   --tabu-tenure 20
 ```
 
-结果默认输出到 `results/`，也可通过 `--output` 指定 JSON 路径：
+结果默认写到 `results/`，也可以显式指定：
 
 ```bash
-python runner.py test_graph.txt --ablation no_rl --output results/result.json
+python runner.py test_graph.txt \
+  --ablation no_rl \
+  --output results/result.json
 ```
 
-## 4. 单次可视化与历史导出
-
-`runner.py` 支持导出单次求解可视化和逐步历史：
-
-- `--save-fig`：保存三联图（着色图 + 冲突曲线 + 颜色使用分布）
-- `--save-history`：保存逐步历史 JSON（step、action、reward、conflicts 等）
-
-示例：
+如果要保存单次运行图和 RL 历史：
 
 ```bash
 python runner.py test_graph.txt \
@@ -99,201 +114,125 @@ python runner.py test_graph.txt \
   --save-history results/plots/single_run_history.json
 ```
 
-## 5. 批量结果聚合可视化
+## 批量对比
 
-新增脚本 `scripts/plot_results.py`，用于读取 `results/*.json` 并自动生成论文/汇报常用图表：
+`scripts/benchmark_compare.py` 用来比较：
 
-- 箱线图：`final_conflicts`（按 `ablation + model_type + search_algorithm` 分组）
-- 散点图：`runtime_sec vs final_conflicts`（含帕累托前沿）
-- 成功率柱状图：`conflicts == 0` 比例
+- `rl_local_search`
+- `local_search_only`
 
-```bash
-python scripts/plot_results.py
-```
+对比数据分两类：
 
-可选参数：
+- `random`：随机图，边概率和颜色数来自 `data/ReadMe.txt`，节点数默认在 `60-120` 之间随机采样
+- `dsjc`：`data/` 目录中实际存在的 DSJC 图，颜色数来自 `data/ReadMe.txt`
 
-```bash
-python scripts/plot_results.py \
-  --input-dir results \
-  --output results/plots/results_dashboard.png \
-  --summary-csv results/plots/results_summary.csv
-```
+默认输出到 `results/benchmark_compare/`：
 
-输出：
+- `benchmark_summary.json`
+- `benchmark_records.csv`
+- `benchmark_overall_summary.csv`
+- `benchmark_per_dataset_summary.csv`
+- `benchmark_pairwise.csv`
 
-- `results/plots/results_dashboard.png`
-- `results/plots/results_summary.csv`
+### 运行示例
 
-## 6. 快速端到端 Smoke Test
+`SA` 版本：
 
 ```bash
-python trainer.py checkpoints/smoke_policy.pth \
-  --epochs 1 --nodes 40 --probability 0.15 --colors 8 \
-  --max_steps_RL 40 --max-steps 50 \
-  --sa-iters 2000 --tabu-iters 200
-
-python runner.py test_graph.txt \
-  --input checkpoints/smoke_policy.pth \
-  --ablation full --model-type gnn --search-algorithm sa \
-  --save-fig results/plots/smoke_single.png \
-  --save-history results/plots/smoke_history.json \
-  --output results/smoke_full.json
-
-python runner.py test_graph.txt \
-  --ablation no_rl --search-algorithm tabu \
-  --tabu-iters 1000 --tabu-tenure 20 \
-  --output results/smoke_no_rl.json
-
-python scripts/plot_results.py \
-  --input-dir results \
-  --output results/plots/results_dashboard.png \
-  --summary-csv results/plots/results_summary.csv
+.\.venv\Scripts\python.exe scripts\benchmark_compare.py \
+  --policy checkpoints/gnn_sa_train_150nodes_24colors_120_multi_policy.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --random-instances-per-config 5 \
+  --random-min-nodes 60 \
+  --random-max-nodes 120 \
+  --max-steps-rl 300 \
+  --max-steps 320 \
+  --output-dir results/benchmark_compare_sa
 ```
 
-## 7. 输入图格式
+`Tabu` 版本：
 
-支持 DIMACS 风格边列表（见 `test_graph.txt`）：
-
-```text
-p edge <节点数> <边数>
-e <u> <v>
+```bash
+.\.venv\Scripts\python.exe scripts\benchmark_compare.py \
+  --policy checkpoints/gnn_tabu_train_150nodes_24colors_120_multi_policy.pth \
+  --model-type gnn \
+  --search-algorithm tabu \
+  --random-instances-per-config 5 \
+  --random-min-nodes 60 \
+  --random-max-nodes 120 \
+  --max-steps-rl 300 \
+  --max-steps 320 \
+  --output-dir results/benchmark_compare_tabu
 ```
 
-注意：文件中节点编号从 `1` 开始，程序内部会自动转为从 `0` 开始。
+只跑 DSJC：
 
-## 8. 项目结构
+```bash
+.\.venv\Scripts\python.exe scripts\benchmark_compare.py \
+  --policy checkpoints/gnn_sa_train_150nodes_24colors_120_multi_policy.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --include-dsjc \
+  --output-dir results/benchmark_compare_dsjc
+```
+
+只跑随机图：
+
+```bash
+.\.venv\Scripts\python.exe scripts\benchmark_compare.py \
+  --policy checkpoints/gnn_sa_train_150nodes_24colors_120_multi_policy.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --include-random \
+  --random-min-nodes 60 \
+  --random-max-nodes 120 \
+  --output-dir results/benchmark_compare_random
+```
+
+小规模 smoke test：
+
+```bash
+.\.venv\Scripts\python.exe scripts\benchmark_compare.py \
+  --policy checkpoints/gnn_sa_train_150nodes_24colors_120_multi_policy.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --include-dsjc \
+  --dataset-names DSJC125.1 \
+  --sa-iters 200 \
+  --max-steps-rl 20 \
+  --max-steps 25 \
+  --output-dir results/benchmark_compare_smoke
+```
+
+### 关键参数
+
+- `--include-random`
+- `--include-dsjc`
+- `--dataset-names DSJC125.1 DSJC250.5`
+- `--random-instances-per-config`
+- `--random-min-nodes`
+- `--random-max-nodes`
+- `--sa-iters`
+- `--tabu-iters`
+- `--max-steps-rl`
+- `--max-steps`
+
+## 结果说明
+
+批量对比时最常看的文件：
+
+- `benchmark_records.csv`：每次运行的明细
+- `benchmark_overall_summary.csv`：按 `random/dsjc + method` 聚合后的成功率、平均冲突数、平均耗时
+- `benchmark_per_dataset_summary.csv`：按具体数据集配置聚合
+- `benchmark_pairwise.csv`：同一实例上 `RL + Local Search` 和 `Local Search Only` 的逐项比较
+
+## 主要文件
 
 - `trainer.py`：训练入口
-- `runner.py`：推理/求解入口
-- `scripts/plot_results.py`：批量结果聚合与可视化
-- `gcp_env/gcp_env.py`：Gym 环境
-- `network.py`：Actor/Critic 与 PPO 策略封装
+- `runner.py`：单次求解入口
+- `scripts/benchmark_compare.py`：批量对比脚本
+- `gcp_env/gcp_env.py`：环境定义
+- `network.py`：Actor / Critic / PPO policy
 - `simulated_annealing.py`：模拟退火
 - `tabu_search.py`：禁忌搜索
-- `test_graph.txt`：示例图数据
-
-## 8.1 T4 x2 多卡训练（分离 Actor/Critic）
-
-在 Kaggle 的 `GPU T4 x2` 环境下，可以把 Actor 放到 `cuda:0`、Critic 放到 `cuda:1`，从而分摊显存占用：
-
-```bash
-python trainer.py checkpoints/policy_t4x2.pth \
-  --model-type gnn \
-  --search-algorithm sa \
-  --device cuda \
-  --split-gpus \
-  --epochs 80 \
-  --nodes 250 --probability 0.5 --colors 24 \
-  --train-env-num 8 --test-env-num 4 \
-  --step-per-epoch 5000 \
-  --step-per-collect 2000 \
-  --repeat-per-collect 10 \
-  --batch-size 256 \
-  --episode-per-test 8 \
-  --lr 3e-4 --vf-coef 0.25 --ent-coef 0.005 \
-  --max_steps_RL 300 --max-steps 320 \
-  --sa-iters 500000 --beta 0.2
-```
-
-也可以手动指定设备：
-
-```bash
-python trainer.py checkpoints/policy_t4x2_manual.pth \
-  --device cuda \
-  --actor-device cuda:0 \
-  --critic-device cuda:1
-```
-
-## 8.2 多图训练模式（提升泛化）
-
-`trainer.py` 新增图采样模式参数：
-
-- `--train-graph-mode {single,multi}`：
-  - `single`（默认）：固定单图训练
-  - `multi`：每次 `reset` 采样新图训练
-- `--eval-graph-mode {single,multi}`：评估阶段是否也按 `reset` 采样新图
-- `--graph-seed`：图采样随机种子（便于复现实验）
-
-推荐泛化训练命令：
-
-```bash
-python trainer.py checkpoints/policy_multi_graph.pth \
-  --model-type gnn \
-  --search-algorithm sa \
-  --train-graph-mode multi \
-  --eval-graph-mode multi \
-  --graph-seed 42 \
-  --epochs 80 \
-  --nodes 120 --probability 0.5 --colors 24
-```
-
-## 9. 推荐训练命令（开箱即用）
-
-### 9.1 建议的初始训练（先看是否稳定收敛）
-
-```bash
-python trainer.py checkpoints/policy_init.pth \
-  --model-type gnn \
-  --search-algorithm sa \
-  --epochs 80 \
-  --nodes 250 --probability 0.5 --colors 24 \
-  --train-env-num 8 --test-env-num 4 \
-  --step-per-epoch 5000 \
-  --step-per-collect 2000 \
-  --repeat-per-collect 10 \
-  --batch-size 256 \
-  --episode-per-test 8 \
-  --lr 3e-4 \
-  --vf-coef 0.25 \
-  --ent-coef 0.005 \
-  --max_steps_RL 300 --max-steps 320 \
-  --sa-iters 500000 --beta 0.2
-```
-
-### 9.2 如果训练波动大（保守稳定版）
-
-```bash
-python trainer.py checkpoints/policy_stable.pth \
-  --model-type gnn \
-  --search-algorithm sa \
-  --epochs 100 \
-  --nodes 250 --probability 0.5 --colors 24 \
-  --train-env-num 12 --test-env-num 6 \
-  --step-per-epoch 10000 \
-  --step-per-collect 2500 \
-  --repeat-per-collect 8 \
-  --batch-size 256 \
-  --episode-per-test 10 \
-  --lr 2e-4 \
-  --vf-coef 0.15 \
-  --ent-coef 0.003 \
-  --max_steps_RL 300 --max-steps 320 \
-  --sa-iters 500000 --beta 0.2
-```
-
-### 9.3 如果学习太慢（激进探索版）
-
-```bash
-python trainer.py checkpoints/policy_fast.pth \
-  --model-type gnn \
-  --search-algorithm sa \
-  --epochs 80 \
-  --nodes 250 --probability 0.5 --colors 24 \
-  --train-env-num 8 --test-env-num 4 \
-  --step-per-epoch 8000 \
-  --step-per-collect 2000 \
-  --repeat-per-collect 12 \
-  --batch-size 256 \
-  --episode-per-test 8 \
-  --lr 5e-4 \
-  --vf-coef 0.2 \
-  --ent-coef 0.007 \
-  --max_steps_RL 300 --max-steps 320 \
-  --sa-iters 500000 --beta 0.2
-```
-
-经验法则：
-- `loss/vf` 长期显著高于策略项：继续下调 `--vf-coef`（如 `0.25 -> 0.15 -> 0.1`）。
-- `loss/ent` 几乎不动且策略不进步：小幅提高 `--lr` 或降低 `--ent-coef`。
-- `test_reward` 方差过大：优先增加 `--step-per-epoch` 和 `--train-env-num`。
