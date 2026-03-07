@@ -95,12 +95,13 @@ def random_specs_from_dsjc(
         raise ValueError(f"random node range is invalid: min_nodes={min_nodes}, max_nodes={max_nodes}")
     color_map = parse_dsjc_readme(readme_path)
     specs: List[DatasetSpec] = []
-    for config_index, (dataset_name, colors) in enumerate(sorted(color_map.items())):
+    for config_index, (dataset_name, _) in enumerate(sorted(color_map.items())):
         _, probability = parse_dsjc_name(dataset_name)
         for instance_id in range(instances_per_config):
             graph_seed = base_seed + config_index * 1000 + instance_id
             nodes_rng = random.Random(graph_seed)
             nodes = nodes_rng.randint(min_nodes, max_nodes)
+            colors = max(1, nodes // 5)
             specs.append(
                 DatasetSpec(
                     dataset_type="random",
@@ -185,7 +186,6 @@ def solve_with_rl(
         search_algorithm=search_algorithm,
         beta=args.beta,
         max_episode_steps_RL=args.max_steps_rl,
-        max_episode_steps=args.max_steps,
         render_mode=None,
     )
     solution, conflicts, history = rollout_with_policy(env, policy)
@@ -329,7 +329,6 @@ def main() -> None:
     parser.add_argument("--tabu-tenure", type=int, default=20, help="Tabu tenure")
     parser.add_argument("--beta", type=float, default=0.2, help="Local search reward weight for RL mode")
     parser.add_argument("--max-steps-rl", type=int, default=300, help="Max RL steps before local search")
-    parser.add_argument("--max-steps", type=int, default=320, help="Max total episode steps")
     args = parser.parse_args()
 
     if not args.include_random and not args.include_dsjc:

@@ -89,7 +89,6 @@ if __name__ == "__main__":
     parser.add_argument("output", type=str, help="Path to output policy file")
     parser.add_argument("--input", type=str, default=None, help="Path to input policy file")
     parser.add_argument("-I", "--max_steps_RL", type=int, default=300, help="Max RL steps in each episode")
-    parser.add_argument("-L", "--max-steps", type=int, dest="max_steps", default=320, help="Max total steps in each episode")
 
     parser.add_argument("-S", "--sa-iters", type=int, default=500000, help="SA iterations")
     parser.add_argument("-T", "--initial-temp", type=float, default=500.0, help="SA initial temperature")
@@ -136,7 +135,7 @@ if __name__ == "__main__":
     parser.add_argument("--graph-seed", type=int, default=None, help="Random seed for graph generation")
     args = parser.parse_args()
 
-    gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps)
+    gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps_RL)
 
     nodes, probability, colors = args.nodes, args.probability, args.colors
     use_fixed_edge_count = args.train_graph_mode == "multi" or args.eval_graph_mode == "multi"
@@ -158,7 +157,6 @@ if __name__ == "__main__":
         search_algorithm=args.search_algorithm,
         beta=args.beta,
         max_episode_steps_RL=args.max_steps_RL,
-        max_episode_steps=args.max_steps,
     )
 
     base_graph = graph_factory()

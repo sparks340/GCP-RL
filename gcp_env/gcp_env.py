@@ -28,7 +28,6 @@ class GcpEnv(gym.Env):
         base_filename=None,
         sa_init=False,
         max_episode_steps_RL=300,
-        max_episode_steps=1000,
         graph_sampler=None,
         resample_on_reset=False,
     ):
@@ -41,7 +40,6 @@ class GcpEnv(gym.Env):
 
         self._k = k
         self._max_episode_steps_RL = max_episode_steps_RL
-        self._max_episode_steps = max_episode_steps
 
         self._n = None
         self._graph = None
@@ -209,23 +207,23 @@ class GcpEnv(gym.Env):
             self._best_solution = self._solution.copy()
 
         search_reward = 0
-        # Local search is expensive, so run it only once when RL exploration budget is exhausted.
-        # The previous ">=" condition reran SA/Tabu at every remaining step of the episode.
+        local_search_finished = False
+        # Run local search exactly once after the RL budget is exhausted, then terminate the episode.
         if self._step == self._max_episode_steps_RL:
             old_search_score = self._calculate_conflicts()
             self._solution, _ = self._run_local_search()
             new_search_score = self._calculate_conflicts()
             search_reward = old_search_score - new_search_score
+            local_search_finished = True
             if new_search_score < self._best_score:
                 self._best_score = new_search_score
                 self._best_solution = self._solution.copy()
 
         reward = immediate_reward + self._beta * search_reward
 
-        # Report terminal/conflict state after the optional local-search handoff.
         final_score = self._calculate_conflicts()
-        terminated = final_score == 0
-        truncated = self._step >= self._max_episode_steps
+        terminated = final_score == 0 or local_search_finished
+        truncated = False
 
         return self._get_obs(), float(reward), terminated, truncated, {
             "step": self._step,

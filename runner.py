@@ -210,7 +210,6 @@ if __name__ == "__main__":
     parser.add_argument("--search-algorithm", choices=["sa", "tabu"], default="sa", help="Local search algorithm")
 
     parser.add_argument("-I", "--max-steps-RL", type=int, default=300, help="Max RL steps per episode")
-    parser.add_argument("-L", "--max-steps", type=int, default=320, help="Max total steps per episode")
     parser.add_argument("-R", "--render", type=str2bool, default=False, help="Whether to display plot")
     parser.add_argument("-O", "--output", type=str, default=None, help="Output file path")
     parser.add_argument("--output-dir", type=str, default="results", help="Output directory")
@@ -260,7 +259,6 @@ if __name__ == "__main__":
             search_algorithm=args.search_algorithm,
             beta=args.beta,
             max_episode_steps_RL=args.max_steps_RL,
-            max_episode_steps=args.max_steps,
             render_mode="human" if args.render else None,
         )
 

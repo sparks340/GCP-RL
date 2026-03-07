@@ -70,7 +70,7 @@ python trainer.py checkpoints/policy_v2.pth \
 - `--lr --vf-coef --ent-coef`
 - `--sa-iters --initial-temp --cooling-rate --min-temp`
 - `--tabu-iters --tabu-tenure`
-- `--max_steps_RL --max-steps`
+- `--max_steps_RL`：RL 先跑多少步；达到该步数后执行一次局部搜索并结束该轮
 
 ## 单次求解
 
@@ -123,7 +123,7 @@ python runner.py test_graph.txt \
 
 对比数据分两类：
 
-- `random`：随机图，边概率和颜色数来自 `data/ReadMe.txt`，节点数默认在 `60-120` 之间随机采样
+- `random`：随机图，边概率来自 `data/ReadMe.txt` 对应配置，节点数默认在 `60-120` 之间随机采样，颜色数默认取 `nodes // 5`
 - `dsjc`：`data/` 目录中实际存在的 DSJC 图，颜色数来自 `data/ReadMe.txt`
 
 默认输出到 `results/benchmark_compare/`：
@@ -147,7 +147,6 @@ python runner.py test_graph.txt \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
   --max-steps-rl 300 \
-  --max-steps 320 \
   --output-dir results/benchmark_compare_sa
 ```
 
@@ -162,7 +161,6 @@ python runner.py test_graph.txt \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
   --max-steps-rl 300 \
-  --max-steps 320 \
   --output-dir results/benchmark_compare_tabu
 ```
 
@@ -201,7 +199,6 @@ python runner.py test_graph.txt \
   --dataset-names DSJC125.1 \
   --sa-iters 200 \
   --max-steps-rl 20 \
-  --max-steps 25 \
   --output-dir results/benchmark_compare_smoke
 ```
 
@@ -216,7 +213,6 @@ python runner.py test_graph.txt \
 - `--sa-iters`
 - `--tabu-iters`
 - `--max-steps-rl`
-- `--max-steps`
 
 ## 结果说明
 
