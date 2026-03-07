@@ -42,22 +42,56 @@ e <u> <v>
 
 训练入口：`trainer.py`
 
-基础示例：
+### 1) 固定规模训练（旧模式）
 
 ```bash
-python trainer.py checkpoints/policy.pth \
+python trainer.py checkpoints/policy_fixed.pth \
   --model-type gnn \
-  --search-algorithm sa
+  --search-algorithm sa \
+  --nodes 250 \
+  --colors 24
 ```
 
-继续训练：
+### 2) 推荐：每个 episode 随机 60~150 节点，按概率使用分段颜色规则
+
+```bash
+python trainer.py checkpoints/policy_random.pth \
+  --model-type gnn \
+  --search-algorithm sa \
+  --random-nodes \
+  --min-nodes 60 \
+  --max-nodes 150
+```
+
+随机图使用以下组合之一（每个 episode 随机选一条规则）：
+
+- `p=0.5` 时，`k=node//7`
+- `p=0.1` 时，`k=node//25`
+- `p=0.9` 时，`k=node//3`
+
+> 启用 `--random-nodes` 后：
+>
+> - 训练环境会在 **每个 episode reset** 时重新采样图规模（不是仅启动时采样一次）。
+> - 颜色数会按当前规则自动设置（`node//7`、`node//25`、`node//3`，最小为 1）。
+> - 训练图模式会自动使用 `multi`，以确保每轮都重采样。
+
+### 3) 从已有权重继续训练
 
 ```bash
 python trainer.py checkpoints/policy_v2.pth \
-  --input checkpoints/policy.pth \
+  --input checkpoints/policy_random.pth \
   --model-type gnn \
-  --search-algorithm sa
+  --search-algorithm sa \
+  --random-nodes \
+  --min-nodes 60 \
+  --max-nodes 150
 ```
+
+随机图使用以下组合之一（每个 episode 随机选一条规则）：
+
+- `p=0.5` 时，`k=node//7`
+- `p=0.1` 时，`k=node//25`
+- `p=0.9` 时，`k=node//3`
 
 ### `trainer.py` 参数
 
@@ -70,7 +104,9 @@ python trainer.py checkpoints/policy_v2.pth \
 - 训练轮数：`--epochs`
 - 并行环境：`--train-env-num`、`--test-env-num`
 - PPO 采样：`--step-per-epoch`、`--step-per-collect`、`--repeat-per-collect`、`--batch-size`、`--episode-per-test`
-- 训练图：`--nodes`、`--probability`、`--colors`
+- 图与采样：
+  - 固定图：`--nodes`、`--probability`、`--colors`
+  - 随机图：`--random-nodes`、`--min-nodes`、`--max-nodes`
 - 奖励与优化：`--beta`、`--lr`、`--vf-coef`、`--ent-coef`
 - 设备：`--device {auto,cpu,cuda}`、`--split-gpus`、`--actor-device`、`--critic-device`
 - 图采样模式：`--train-graph-mode {single,multi}`、`--eval-graph-mode {single,multi}`、`--graph-seed`
@@ -78,7 +114,8 @@ python trainer.py checkpoints/policy_v2.pth \
 说明：
 
 - `--max_steps_RL` 表示 RL 先运行多少步；达到该步数后执行一次局部搜索并结束这一轮。
-- `--train-graph-mode multi` / `--eval-graph-mode multi` 适合做随机图泛化训练。
+- `--random-nodes` 打开时，训练端会走可变规模图的 padding + mask 流程，适合做泛化训练。
+- `--eval-graph-mode` 可单独设置为 `single`（固定验证图）或 `multi`（每次验证重采样）。
 
 ## 单次求解
 
