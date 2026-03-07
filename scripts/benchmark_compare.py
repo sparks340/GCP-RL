@@ -86,19 +86,18 @@ def existing_dsjc_specs(data_dir: Path, readme_path: Path) -> List[DatasetSpec]:
     return specs
 
 
-def random_specs_from_dsjc(
-    readme_path: Path,
-    instances_per_config: int,
-    base_seed: int,
+def random_specs(
     min_nodes: int,
     max_nodes: int,
+    probabilities: Sequence[float],
+    instances_per_config: int,
+    base_seed: int,
 ) -> List[DatasetSpec]:
     if min_nodes > max_nodes:
         raise ValueError(f"random node range is invalid: min_nodes={min_nodes}, max_nodes={max_nodes}")
-    color_map = parse_dsjc_readme(readme_path)
     specs: List[DatasetSpec] = []
-    for config_index, (dataset_name, _) in enumerate(sorted(color_map.items())):
-        _, probability = parse_dsjc_name(dataset_name)
+    for config_index, probability in enumerate(probabilities):
+        config_name = f"ER_n{min_nodes}-{max_nodes}_p{probability:.1f}"
         for trial_id in range(instances_per_config):
             graph_seed = base_seed + config_index * 1000 + trial_id
             nodes_rng = random.Random(graph_seed)
@@ -107,8 +106,8 @@ def random_specs_from_dsjc(
             specs.append(
                 DatasetSpec(
                     dataset_type="random",
-                    dataset_name=f"ER_n{nodes}_p{probability:.1f}_trial{trial_id + 1}",
-                    config_name=dataset_name,
+                    dataset_name=f"{config_name}_trial{trial_id + 1}",
+                    config_name=config_name,
                     graph_path=None,
                     nodes=nodes,
                     probability=probability,
@@ -337,8 +336,15 @@ def main() -> None:
     parser.add_argument("--include-dsjc", action="store_true", help="Include DSJC graphs")
     parser.add_argument("--random-instances-per-config", type=int, default=20, help="Random graphs per config")
     parser.add_argument("--dsjc-runs-per-config", type=int, default=20, help="Runs per DSJC config")
-    parser.add_argument("--random-min-nodes", type=int, default=60, help="Minimum nodes for random graphs")
-    parser.add_argument("--random-max-nodes", type=int, default=120, help="Maximum nodes for random graphs")
+    parser.add_argument("--random-min-nodes", type=int, default=60, help="Minimum nodes for pure random graphs")
+    parser.add_argument("--random-max-nodes", type=int, default=120, help="Maximum nodes for pure random graphs")
+    parser.add_argument(
+        "--random-probabilities",
+        type=float,
+        nargs="+",
+        default=[0.1, 0.5, 0.9],
+        help="Edge probabilities for pure random Erdos-Renyi graphs",
+    )
     parser.add_argument("--seed", type=int, default=1234, help="Base random seed")
     parser.add_argument("--output-dir", type=str, default="results/benchmark_compare", help="Output directory")
     parser.add_argument(
@@ -370,26 +376,33 @@ def main() -> None:
     readme_path = Path(args.readme_path)
     output_dir = Path(args.output_dir)
 
+    if args.random_min_nodes <= 0 or args.random_max_nodes <= 0:
+        raise SystemExit("--random-min-nodes and --random-max-nodes must be positive integers.")
+    if args.random_min_nodes > args.random_max_nodes:
+        raise SystemExit("--random-min-nodes must be less than or equal to --random-max-nodes.")
+    if any(probability <= 0.0 or probability >= 1.0 for probability in args.random_probabilities):
+        raise SystemExit("--random-probabilities must all be between 0 and 1.")
+
     dsjc_specs = (
         expand_dsjc_specs(existing_dsjc_specs(data_dir, readme_path), args.dsjc_runs_per_config)
         if args.include_dsjc
         else []
     )
-    random_specs = (
-        random_specs_from_dsjc(
-            readme_path,
-            args.random_instances_per_config,
-            args.seed,
+    random_dataset_specs = (
+        random_specs(
             args.random_min_nodes,
             args.random_max_nodes,
+            args.random_probabilities,
+            args.random_instances_per_config,
+            args.seed,
         )
         if args.include_random
         else []
     )
     dsjc_specs = filter_specs_by_name(dsjc_specs, args.dataset_names)
-    random_specs = filter_specs_by_name(random_specs, args.dataset_names)
+    random_dataset_specs = filter_specs_by_name(random_dataset_specs, args.dataset_names)
 
-    specs = [*random_specs, *dsjc_specs]
+    specs = [*random_dataset_specs, *dsjc_specs]
     if not specs:
         raise SystemExit("No datasets found. Check data directory and ReadMe.txt.")
 

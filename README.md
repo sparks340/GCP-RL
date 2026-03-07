@@ -148,7 +148,7 @@ python runner.py test_graph.txt \
 
 数据分两类：
 
-- `random`：随机图，边概率来自 `data/ReadMe.txt` 对应配置，节点数默认在 `60-120` 间随机采样，颜色数默认取 `nodes // 5`
+- `random`：纯随机 Erdos-Renyi 图，节点数默认在 `60-120` 间随机采样，边概率默认取 `0.1/0.5/0.9`，每个概率配置独立随机生成 20 次，颜色数默认取 `nodes // 5`
 - `dsjc`：`data/` 中实际存在的 DSJC 图，颜色数来自 `data/ReadMe.txt`
 
 默认输出目录：`results/benchmark_compare/`
@@ -173,6 +173,7 @@ python runner.py test_graph.txt \
   --random-instances-per-config 20 \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
+  --random-probabilities 0.1 0.5 0.9 \
   --max-steps-rl 300 \
   --output-dir results/benchmark_compare_sa
 ```
@@ -187,6 +188,7 @@ python runner.py test_graph.txt \
   --random-instances-per-config 20 \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
+  --random-probabilities 0.1 0.5 0.9 \
   --max-steps-rl 300 \
   --output-dir results/benchmark_compare_tabu
 ```
@@ -212,6 +214,7 @@ python runner.py test_graph.txt \
   --include-random \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
+  --random-probabilities 0.1 0.5 0.9 \
   --output-dir results/benchmark_compare_random
 ```
 
@@ -234,7 +237,7 @@ smoke test：
 - 模型与搜索：`--policy`、`--model-type {gnn,mlp}`、`--search-algorithm {sa,tabu}`
 - 数据路径：`--data-dir`、`--readme-path`
 - 数据范围：`--include-random`、`--include-dsjc`、`--dataset-names`
-- 随机图采样：`--random-instances-per-config`、`--random-min-nodes`、`--random-max-nodes`、`--seed`
+- 随机图采样：`--random-instances-per-config`、`--random-min-nodes`、`--random-max-nodes`、`--random-probabilities`、`--seed`
 - DSJC 重复运行：`--dsjc-runs-per-config`
 - 模拟退火：`--sa-iters`、`--initial-temp`、`--cooling-rate`、`--min-temp`
 - 禁忌搜索：`--tabu-iters`、`--tabu-tenure`
@@ -253,7 +256,7 @@ smoke test：
 
 - `benchmark_records.csv`：每次运行明细
 - `benchmark_overall_summary.csv`：按 `random/dsjc + method` 聚合后的成功率（`x/总次数`）、平均冲突数、平均耗时
-- `benchmark_per_dataset_summary.csv`：按具体数据集配置聚合；随机图按来源配置统计，展示名不再复用 `DSJCxxx.x`
+- `benchmark_per_dataset_summary.csv`：按具体数据集配置聚合；随机图配置名形如 `ER_n60-120_p0.1`
 - `benchmark_pairwise.csv`：同一实例上 `RL + Local Search` 与 `Local Search Only` 的逐项对比
 
 ## 主要文件
