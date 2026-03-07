@@ -30,6 +30,9 @@ class GcpEnv(gym.Env):
         max_episode_steps_RL=300,
         graph_sampler=None,
         resample_on_reset=False,
+        max_nodes=None,
+        max_colors=None,
+        k_sampler=None,
     ):
         super().__init__()
         if graph is None and graph_sampler is None:
@@ -37,6 +40,7 @@ class GcpEnv(gym.Env):
 
         self._graph_sampler = graph_sampler
         self._resample_on_reset = resample_on_reset and graph_sampler is not None
+        self._k_sampler = k_sampler
 
         self._k = k
         self._max_episode_steps_RL = max_episode_steps_RL
@@ -48,19 +52,46 @@ class GcpEnv(gym.Env):
         self._edge_index = None
 
         initial_graph = graph if graph is not None else graph_sampler()
-        self._set_graph(initial_graph)
 
-        n = self._n
+        self._max_nodes = max_nodes if max_nodes is not None else len(initial_graph)
+        self._max_colors = max_colors if max_colors is not None else k
+        if self._max_nodes <= 0 or self._max_colors <= 0:
+            raise ValueError("max_nodes and max_colors must be positive")
+
+        if self._k > self._max_colors:
+            raise ValueError(f"k ({self._k}) cannot be greater than max_colors ({self._max_colors})")
+
+        self._max_directed_edges = self._max_nodes * (self._max_nodes - 1)
+
+        self._set_graph(initial_graph)
+        self._configure_k_from_graph()
+
         self.observation_space = spaces.Dict(
             {
-                "edge_index": spaces.Sequence(spaces.Box(0, n - 1, shape=(2,), dtype=np.int32)),
-                "node_features": spaces.Box(low=-float("inf"), high=float("inf"), shape=(n, 3), dtype=np.float32),
-                "col_features": spaces.Box(low=-float("inf"), high=float("inf"), shape=(n, k, 3), dtype=np.float32),
-                "k": spaces.Discrete(k + 1),
+                "edge_index": spaces.Box(
+                    low=-1,
+                    high=self._max_nodes - 1,
+                    shape=(2, self._max_directed_edges),
+                    dtype=np.int32,
+                ),
+                "node_features": spaces.Box(
+                    low=-float("inf"),
+                    high=float("inf"),
+                    shape=(self._max_nodes, 3),
+                    dtype=np.float32,
+                ),
+                "col_features": spaces.Box(
+                    low=-float("inf"),
+                    high=float("inf"),
+                    shape=(self._max_nodes, self._max_colors, 3),
+                    dtype=np.float32,
+                ),
+                "k": spaces.Discrete(self._max_colors + 1),
+                "n": spaces.Discrete(self._max_nodes + 1),
             }
         )
 
-        self.action_space = spaces.Discrete(n * k)
+        self.action_space = spaces.Discrete(self._max_nodes * self._max_colors)
 
         self._solution = None
         self._best_solution = None
@@ -68,7 +99,7 @@ class GcpEnv(gym.Env):
 
         self._sa_solver = SimulatedAnnealingSolver(
             self._adj_list,
-            k,
+            self._k,
             max_iterations=sa_iters,
             initial_temp=initial_temp,
             cooling_rate=cooling_rate,
@@ -76,7 +107,7 @@ class GcpEnv(gym.Env):
         )
         self._tabu_solver = TabuSearchSolver(
             self._adj_list,
-            k,
+            self._k,
             max_iterations=tabu_iters,
             tabu_tenure=tabu_tenure,
         )
@@ -89,32 +120,52 @@ class GcpEnv(gym.Env):
         self._episode = 0
         self._step = 0
 
+    def _configure_k_from_graph(self):
+        if self._k_sampler is not None:
+            sampled_k = int(self._k_sampler(self._n))
+            self._k = max(1, sampled_k)
+        if self._k > self._max_colors:
+            raise ValueError(f"Sampled k ({self._k}) exceeds max_colors ({self._max_colors})")
+
+        if hasattr(self, "_sa_solver") and self._sa_solver is not None:
+            self._sa_solver.k = self._k
+            self._sa_solver.n = self._n
+        if hasattr(self, "_tabu_solver") and self._tabu_solver is not None:
+            self._tabu_solver.k = self._k
+            self._tabu_solver.n = self._n
+
     def _set_graph(self, graph):
         n = len(graph)
-        if self._n is None:
-            self._n = n
-        elif n != self._n:
-            raise ValueError(
-                f"Graph sampler returned {n} nodes, expected fixed node count {self._n}. "
-                "Use a fixed node count for one trainer run."
-            )
+        if n > self._max_nodes:
+            raise ValueError(f"Graph has {n} nodes, which exceeds max_nodes={self._max_nodes}")
 
+        self._n = n
         self._graph = graph
         self._adj_matrix = nx.to_numpy_array(graph, dtype=np.int32)
         self._adj_list = [list(self._graph.neighbors(node)) for node in range(n)]
 
         edges = np.array(list(self._graph.edges), dtype=np.int64)
         if len(edges) == 0:
-            self._edge_index = np.zeros((2, 0), dtype=np.int64)
+            edge_index = np.zeros((2, 0), dtype=np.int64)
         else:
             reverse_edges = edges[:, ::-1]
             bidirectional_edges = np.vstack([edges, reverse_edges])
-            self._edge_index = bidirectional_edges.T
+            edge_index = bidirectional_edges.T
+
+        if edge_index.shape[1] > self._max_directed_edges:
+            raise ValueError(
+                f"Graph has {edge_index.shape[1]} directed edges, which exceeds max_directed_edges={self._max_directed_edges}"
+            )
+
+        self._edge_index = np.full((2, self._max_directed_edges), -1, dtype=np.int64)
+        self._edge_index[:, : edge_index.shape[1]] = edge_index
 
         if hasattr(self, "_sa_solver") and self._sa_solver is not None:
             self._sa_solver.adj_list = self._adj_list
+            self._sa_solver.n = n
         if hasattr(self, "_tabu_solver") and self._tabu_solver is not None:
             self._tabu_solver.adj_list = self._adj_list
+            self._tabu_solver.n = n
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -122,10 +173,12 @@ class GcpEnv(gym.Env):
         if self._resample_on_reset and self._graph_sampler is not None:
             self._set_graph(self._graph_sampler())
 
+        self._configure_k_from_graph()
+
         if self._sa_init and self._search_algorithm == "sa":
             self._solution, _ = self._sa_solver.solve()
         else:
-            self._solution = [random.randint(0, self._k - 1) for _ in range(len(self._graph))]
+            self._solution = [random.randint(0, self._k - 1) for _ in range(self._n)]
 
         self._best_solution = self._solution.copy()
         self._best_score = self._calculate_conflicts()
@@ -136,26 +189,25 @@ class GcpEnv(gym.Env):
 
     def _calculate_conflicts(self):
         conflicts = 0
-        for i in range(len(self._graph)):
+        for i in range(self._n):
             for j in self._adj_list[i]:
                 if self._solution[i] == self._solution[j]:
                     conflicts += 1
         return conflicts // 2
 
     def _get_obs(self):
-        n = len(self._graph)
-        node_features = np.zeros((n, 3), dtype=np.float32)
-        col_features = np.zeros((n, self._k, 3), dtype=np.float32)
+        node_features = np.zeros((self._max_nodes, 3), dtype=np.float32)
+        col_features = np.zeros((self._max_nodes, self._max_colors, 3), dtype=np.float32)
 
-        for i in range(n):
+        for i in range(self._n):
             conflicts = sum(1 for j in self._adj_list[i] if self._solution[i] == self._solution[j])
             node_features[i] = [
                 conflicts / len(self._adj_list[i]) if self._adj_list[i] else 0,
-                len(self._adj_list[i]) / n,
+                len(self._adj_list[i]) / self._n,
                 self._solution[i] / self._k,
             ]
 
-        for i in range(n):
+        for i in range(self._n):
             for c in range(self._k):
                 conflicts = sum(1 for j in self._adj_list[i] if self._solution[j] == c)
                 col_features[i, c] = [
@@ -165,10 +217,11 @@ class GcpEnv(gym.Env):
                 ]
 
         return {
-            "edge_index": self._edge_index,
+            "edge_index": self._edge_index.astype(np.int32, copy=False),
             "node_features": node_features,
             "col_features": col_features,
             "k": self._k,
+            "n": self._n,
         }
 
     def _run_local_search(self):
@@ -182,29 +235,34 @@ class GcpEnv(gym.Env):
     def step(self, action):
         self._step += 1
 
+        action_k = self._max_colors
         if isinstance(action, (list, tuple, np.ndarray)):
             if len(action) == 2:
                 node, color = action
             else:
                 action = action[0] if isinstance(action, np.ndarray) else action
-                node = action // self._k
-                color = action % self._k
+                node = action // action_k
+                color = action % action_k
         else:
-            node = action // self._k
-            color = action % self._k
+            node = action // action_k
+            color = action % action_k
 
         node = int(node)
         color = int(color)
 
         old_score = self._calculate_conflicts()
-        self._solution[node] = color
-        new_score = self._calculate_conflicts()
 
-        immediate_reward = old_score - new_score
+        if node >= self._n or color >= self._k:
+            immediate_reward = -1.0
+            new_score = old_score
+        else:
+            self._solution[node] = color
+            new_score = self._calculate_conflicts()
+            immediate_reward = old_score - new_score
 
-        if new_score < self._best_score:
-            self._best_score = new_score
-            self._best_solution = self._solution.copy()
+            if new_score < self._best_score:
+                self._best_score = new_score
+                self._best_solution = self._solution.copy()
 
         search_reward = 0
         local_search_finished = False
@@ -225,14 +283,20 @@ class GcpEnv(gym.Env):
         terminated = final_score == 0 or local_search_finished
         truncated = False
 
+        padded_best_solution = np.full(self._max_nodes, -1, dtype=np.int32)
+        if self._best_solution is not None:
+            padded_best_solution[: len(self._best_solution)] = np.asarray(self._best_solution, dtype=np.int32)
+
         return self._get_obs(), float(reward), terminated, truncated, {
             "step": self._step,
-            "best_solution": self._best_solution,
+            "best_solution": padded_best_solution,
             "conflicts": final_score,
             "best_conflicts": self._best_score,
             "immediate_reward": float(immediate_reward),
             "search_reward": float(search_reward),
             "total_reward": float(reward),
+            "n": self._n,
+            "k": self._k,
         }
 
     def get_graph(self):

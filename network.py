@@ -23,16 +23,28 @@ class GNNNodeNetwork(nn.Module):
 
         # Support both a shared graph edge index [2, E] and batched edge index [B, 2, E].
         if edge_index.dim() == 2:
-            edge_index = edge_index.unsqueeze(0).expand(batch_size, -1, -1)
-        elif edge_index.dim() == 3 and edge_index.size(0) == 1:
-            edge_index = edge_index.expand(batch_size, -1, -1)
-        elif edge_index.dim() != 3 or edge_index.size(0) != batch_size:
+            edge_index = edge_index.unsqueeze(0)
+        elif edge_index.dim() != 3 or edge_index.size(0) not in (1, batch_size):
             raise ValueError(f"Unexpected edge_index shape: {tuple(edge_index.shape)}")
 
-        # Offset node ids for each graph in the batch after flattening node features.
-        offsets = torch.arange(batch_size, device=edge_index.device).view(batch_size, 1, 1) * num_nodes
-        edge_index = edge_index + offsets
-        edge_index = edge_index.permute(1, 0, 2).reshape(2, -1)
+        if edge_index.size(0) == 1 and batch_size > 1:
+            edge_index = edge_index.expand(batch_size, -1, -1)
+
+        # Each sample may contain padded edges (=-1). Filter them per graph, then offset node ids.
+        edge_chunks = []
+        for batch_idx in range(batch_size):
+            sample_edge_index = edge_index[batch_idx]
+            valid_mask = (sample_edge_index[0] >= 0) & (sample_edge_index[1] >= 0)
+            sample_edge_index = sample_edge_index[:, valid_mask]
+            if sample_edge_index.numel() == 0:
+                continue
+            sample_edge_index = sample_edge_index + (batch_idx * num_nodes)
+            edge_chunks.append(sample_edge_index)
+
+        if edge_chunks:
+            edge_index = torch.cat(edge_chunks, dim=1)
+        else:
+            edge_index = torch.empty((2, 0), device=x.device, dtype=torch.long)
 
         x = torch.relu(self.conv1(x, edge_index))
         x = torch.relu(self.conv2(x, edge_index))
@@ -88,6 +100,18 @@ class ActorNetwork(nn.Module):
         # Keeping logits (instead of pre-softmax probabilities) stabilizes PPO updates
         # and allows torch.distributions.Categorical(logits=...) to handle normalization.
         joint_logits = node_logits.unsqueeze(-1) + col_logits
+
+        # Mask actions that point to padded nodes/colors when variable graph size is used.
+        if "n" in obs and "k" in obs:
+            n_per_sample = torch.as_tensor(obs["n"], device=self.device, dtype=torch.long).view(-1)
+            k_per_sample = torch.as_tensor(obs["k"], device=self.device, dtype=torch.long).view(-1)
+            node_count = joint_logits.size(1)
+            color_count = joint_logits.size(2)
+            node_idx = torch.arange(node_count, device=self.device).view(1, node_count, 1)
+            color_idx = torch.arange(color_count, device=self.device).view(1, 1, color_count)
+            invalid_mask = (node_idx >= n_per_sample.view(-1, 1, 1)) | (color_idx >= k_per_sample.view(-1, 1, 1))
+            joint_logits = joint_logits.masked_fill(invalid_mask, torch.finfo(joint_logits.dtype).min)
+
         logits = torch.flatten(joint_logits, start_dim=1)
         return logits, state
 
