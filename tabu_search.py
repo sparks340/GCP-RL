@@ -34,6 +34,11 @@ class TabuSearchSolver:
             if initial_solution is not None
             else self.generate_initial_solution()
         )
+        neighbor_color_counts = [[0] * self.k for _ in range(self.n)]
+        for node in range(self.n):
+            for neighbor in self.adj_list[node]:
+                neighbor_color_counts[node][current[neighbor]] += 1
+
         current_score = self.calculate_conflicts(current)
         best = current.copy()
         best_score = current_score
@@ -54,10 +59,8 @@ class TabuSearchSolver:
                     if color == old_color:
                         continue
                     move = (node, color)
-
-                    candidate = current.copy()
-                    candidate[node] = color
-                    cand_score = self.calculate_conflicts(candidate)
+                    delta = neighbor_color_counts[node][color] - neighbor_color_counts[node][old_color]
+                    cand_score = current_score + delta
 
                     is_tabu = move in tabu_set
                     aspiration = cand_score < best_score
@@ -72,8 +75,13 @@ class TabuSearchSolver:
                 break
 
             node, color = best_move
+            old_color = current[node]
             current[node] = color
             current_score = best_move_score
+
+            for neighbor in self.adj_list[node]:
+                neighbor_color_counts[neighbor][old_color] -= 1
+                neighbor_color_counts[neighbor][color] += 1
 
             tabu_queue.append(best_move)
             tabu_set = set(tabu_queue)
