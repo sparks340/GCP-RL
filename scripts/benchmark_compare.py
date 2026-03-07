@@ -24,11 +24,12 @@ from runner import read_graph_from_file, rollout_with_policy, run_no_rl
 class DatasetSpec:
     dataset_type: str
     dataset_name: str
+    config_name: str
     graph_path: Optional[Path]
     nodes: int
     probability: Optional[float]
     colors: int
-    instance_id: int = 0
+    trial_id: int = 0
     graph_seed: Optional[int] = None
 
 
@@ -75,6 +76,7 @@ def existing_dsjc_specs(data_dir: Path, readme_path: Path) -> List[DatasetSpec]:
             DatasetSpec(
                 dataset_type="dsjc",
                 dataset_name=dataset_name,
+                config_name=dataset_name,
                 graph_path=graph_path,
                 nodes=nodes,
                 probability=probability,
@@ -97,21 +99,42 @@ def random_specs_from_dsjc(
     specs: List[DatasetSpec] = []
     for config_index, (dataset_name, _) in enumerate(sorted(color_map.items())):
         _, probability = parse_dsjc_name(dataset_name)
-        for instance_id in range(instances_per_config):
-            graph_seed = base_seed + config_index * 1000 + instance_id
+        for trial_id in range(instances_per_config):
+            graph_seed = base_seed + config_index * 1000 + trial_id
             nodes_rng = random.Random(graph_seed)
             nodes = nodes_rng.randint(min_nodes, max_nodes)
             colors = max(1, nodes // 5)
             specs.append(
                 DatasetSpec(
                     dataset_type="random",
-                    dataset_name=dataset_name,
+                    dataset_name=f"ER_n{nodes}_p{probability:.1f}_trial{trial_id + 1}",
+                    config_name=dataset_name,
                     graph_path=None,
                     nodes=nodes,
                     probability=probability,
                     colors=colors,
-                    instance_id=instance_id,
+                    trial_id=trial_id,
                     graph_seed=graph_seed,
+                )
+            )
+    return specs
+
+
+def expand_dsjc_specs(base_specs: Sequence[DatasetSpec], runs_per_config: int) -> List[DatasetSpec]:
+    specs: List[DatasetSpec] = []
+    for spec in base_specs:
+        for trial_id in range(runs_per_config):
+            specs.append(
+                DatasetSpec(
+                    dataset_type=spec.dataset_type,
+                    dataset_name=spec.dataset_name,
+                    config_name=spec.config_name,
+                    graph_path=spec.graph_path,
+                    nodes=spec.nodes,
+                    probability=spec.probability,
+                    colors=spec.colors,
+                    trial_id=trial_id,
+                    graph_seed=spec.graph_seed,
                 )
             )
     return specs
@@ -121,7 +144,7 @@ def filter_specs_by_name(specs: Sequence[DatasetSpec], dataset_names: Optional[S
     if not dataset_names:
         return list(specs)
     allowed = set(dataset_names)
-    return [spec for spec in specs if spec.dataset_name in allowed]
+    return [spec for spec in specs if spec.config_name in allowed]
 
 
 def make_random_graph(nodes: int, probability: float, seed: int) -> nx.Graph:
@@ -217,11 +240,14 @@ def summarize(records: Sequence[Dict], group_keys: Sequence[str]) -> List[Dict]:
     for key, items in sorted(groups.items()):
         conflicts = [float(item["conflicts"]) for item in items]
         runtimes = [float(item["runtime_sec"]) for item in items]
+        success_count = sum(conflict == 0 for conflict in conflicts)
         row = {group_keys[idx]: key[idx] for idx in range(len(group_keys))}
         row.update(
             {
                 "runs": len(items),
-                "success_rate": sum(conflict == 0 for conflict in conflicts) / len(conflicts),
+                "success_count": success_count,
+                "success_rate": f"{success_count}/{len(items)}",
+                "success_rate_value": success_count / len(items),
                 "mean_conflicts": float(np.mean(conflicts)),
                 "median_conflicts": float(median(conflicts)),
                 "min_conflicts": float(min(conflicts)),
@@ -237,7 +263,7 @@ def summarize(records: Sequence[Dict], group_keys: Sequence[str]) -> List[Dict]:
 def build_pairwise(records: Sequence[Dict]) -> List[Dict]:
     grouped: Dict[Tuple[str, str, int], Dict[str, Dict]] = {}
     for record in records:
-        key = (record["dataset_type"], record["dataset_name"], int(record["instance_id"]))
+        key = (record["dataset_type"], record["config_name"], int(record["trial_id"]))
         grouped.setdefault(key, {})[record["method"]] = record
 
     rows: List[Dict] = []
@@ -251,8 +277,8 @@ def build_pairwise(records: Sequence[Dict]) -> List[Dict]:
         rows.append(
             {
                 "dataset_type": key[0],
-                "dataset_name": key[1],
-                "instance_id": key[2],
+                "config_name": key[1],
+                "trial_id": key[2],
                 "rl_conflicts": rl_conflicts,
                 "local_conflicts": ls_conflicts,
                 "conflict_delta": rl_conflicts - ls_conflicts,
@@ -294,8 +320,8 @@ def print_summary(label: str, rows: Iterable[Dict]) -> None:
     print(label)
     for row in rows:
         print(
-            f"- {row['dataset_type']}/{row.get('dataset_name', 'ALL')}/{row['method']}: "
-            f"runs={row['runs']}, success_rate={row['success_rate']:.3f}, "
+            f"- {row['dataset_type']}/{row.get('config_name', 'ALL')}/{row['method']}: "
+            f"runs={row['runs']}, success_rate={row['success_rate']}, "
             f"mean_conflicts={row['mean_conflicts']:.3f}, mean_runtime={row['mean_runtime_sec']:.3f}s"
         )
 
@@ -309,7 +335,8 @@ def main() -> None:
     parser.add_argument("--readme-path", type=str, default="data/ReadMe.txt", help="DSJC color mapping file")
     parser.add_argument("--include-random", action="store_true", help="Include random graphs")
     parser.add_argument("--include-dsjc", action="store_true", help="Include DSJC graphs")
-    parser.add_argument("--random-instances-per-config", type=int, default=5, help="Random graphs per DSJC-sized config")
+    parser.add_argument("--random-instances-per-config", type=int, default=20, help="Random graphs per config")
+    parser.add_argument("--dsjc-runs-per-config", type=int, default=20, help="Runs per DSJC config")
     parser.add_argument("--random-min-nodes", type=int, default=60, help="Minimum nodes for random graphs")
     parser.add_argument("--random-max-nodes", type=int, default=120, help="Maximum nodes for random graphs")
     parser.add_argument("--seed", type=int, default=1234, help="Base random seed")
@@ -343,7 +370,11 @@ def main() -> None:
     readme_path = Path(args.readme_path)
     output_dir = Path(args.output_dir)
 
-    dsjc_specs = existing_dsjc_specs(data_dir, readme_path) if args.include_dsjc else []
+    dsjc_specs = (
+        expand_dsjc_specs(existing_dsjc_specs(data_dir, readme_path), args.dsjc_runs_per_config)
+        if args.include_dsjc
+        else []
+    )
     random_specs = (
         random_specs_from_dsjc(
             readme_path,
@@ -399,7 +430,8 @@ def main() -> None:
             record = {
                 "dataset_type": spec.dataset_type,
                 "dataset_name": spec.dataset_name,
-                "instance_id": spec.instance_id,
+                "config_name": spec.config_name,
+                "trial_id": spec.trial_id,
                 "graph_seed": spec.graph_seed,
                 "method": method,
                 "ablation": "full" if method == "rl_local_search" else "no_rl",
@@ -417,12 +449,12 @@ def main() -> None:
             }
             records.append(record)
             print(
-                f"[{run_index}/{total_runs}] {spec.dataset_type}/{spec.dataset_name}/#{spec.instance_id} "
+                f"[{run_index}/{total_runs}] {spec.dataset_type}/{spec.config_name}/trial{spec.trial_id + 1} "
                 f"{method}: conflicts={conflicts}, runtime={runtime_sec:.3f}s"
             )
 
     overall_rows = summarize(records, ["dataset_type", "method"])
-    per_dataset_rows = summarize(records, ["dataset_type", "dataset_name", "method"])
+    per_dataset_rows = summarize(records, ["dataset_type", "config_name", "method"])
     pairwise_rows = build_pairwise(records)
 
     summary_payload = {

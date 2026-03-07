@@ -170,7 +170,7 @@ python runner.py test_graph.txt \
   --policy checkpoints/gnn_sa_train_150nodes_24colors_120_multi_policy.pth \
   --model-type gnn \
   --search-algorithm sa \
-  --random-instances-per-config 5 \
+  --random-instances-per-config 20 \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
   --max-steps-rl 300 \
@@ -184,7 +184,7 @@ python runner.py test_graph.txt \
   --policy checkpoints/gnn_tabu_train_150nodes_24colors_120_multi_policy.pth \
   --model-type gnn \
   --search-algorithm tabu \
-  --random-instances-per-config 5 \
+  --random-instances-per-config 20 \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
   --max-steps-rl 300 \
@@ -235,6 +235,7 @@ smoke test：
 - 数据路径：`--data-dir`、`--readme-path`
 - 数据范围：`--include-random`、`--include-dsjc`、`--dataset-names`
 - 随机图采样：`--random-instances-per-config`、`--random-min-nodes`、`--random-max-nodes`、`--seed`
+- DSJC 重复运行：`--dsjc-runs-per-config`
 - 模拟退火：`--sa-iters`、`--initial-temp`、`--cooling-rate`、`--min-temp`
 - 禁忌搜索：`--tabu-iters`、`--tabu-tenure`
 - RL 相关：`--beta`、`--max-steps-rl`
@@ -251,8 +252,8 @@ smoke test：
 批量对比常看的文件：
 
 - `benchmark_records.csv`：每次运行明细
-- `benchmark_overall_summary.csv`：按 `random/dsjc + method` 聚合后的成功率、平均冲突数、平均耗时
-- `benchmark_per_dataset_summary.csv`：按具体数据集配置聚合
+- `benchmark_overall_summary.csv`：按 `random/dsjc + method` 聚合后的成功率（`x/总次数`）、平均冲突数、平均耗时
+- `benchmark_per_dataset_summary.csv`：按具体数据集配置聚合；随机图按来源配置统计，展示名不再复用 `DSJCxxx.x`
 - `benchmark_pairwise.csv`：同一实例上 `RL + Local Search` 与 `Local Search Only` 的逐项对比
 
 ## 主要文件
