@@ -216,7 +216,8 @@ if __name__ == "__main__":
     parser.add_argument("--save-fig", type=str, default=None, help="Path to save visualization image")
     parser.add_argument("--save-history", type=str, default=None, help="Path to save per-step RL history JSON")
     parser.add_argument("-B", "--beta", type=float, default=0.1, help="Local search reward weight")
-    parser.add_argument("--stagnation-penalty", type=float, default=1e-3, help="Penalty applied when an RL action does not change conflicts")
+    parser.add_argument("--stagnation-penalty", type=float, default=1e-4, help="Penalty applied on true no-op actions (same color, unchanged conflicts)")
+    parser.add_argument("--reward-scale", type=float, default=20.0, help="Global multiplier applied after reward normalization")
     args = parser.parse_args()
 
     graph = read_graph_from_file(args.graph)
@@ -260,6 +261,7 @@ if __name__ == "__main__":
             search_algorithm=args.search_algorithm,
             beta=args.beta,
             stagnation_penalty=args.stagnation_penalty,
+            reward_scale=args.reward_scale,
             max_episode_steps_RL=args.max_steps_RL,
             render_mode="human" if args.render else None,
         )

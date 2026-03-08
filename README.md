@@ -107,7 +107,7 @@ python trainer.py checkpoints/policy_v2.pth \
 - 图与采样：
   - 固定图：`--nodes`、`--probability`、`--colors`
   - 随机图：`--random-nodes`、`--min-nodes`、`--max-nodes`
-- 奖励与优化：`--beta`、`--stagnation-penalty`、`--actor-lr`、`--critic-lr`、`--lr`（兼容旧参数） 、`--vf-coef`、`--ent-coef`
+- 奖励与优化：`--beta`、`--stagnation-penalty`（仅惩罚真 no-op）、`--reward-scale`、`--actor-lr`、`--critic-lr`、`--lr`（兼容旧参数） 、`--vf-coef`、`--ent-coef`
 - 设备：`--device {auto,cpu,cuda}`、`--split-gpus`、`--actor-device`、`--critic-device`
 - 图采样模式：`--train-graph-mode {single,multi}`、`--eval-graph-mode {single,multi}`、`--graph-seed`
 
@@ -165,7 +165,7 @@ python runner.py test_graph.txt \
 - 颜色与搜索：`--colors`、`--search-algorithm {sa,tabu}`
 - 模拟退火：`--sa-iters`、`--initial-temp`、`--cooling-rate`、`--min-temp`
 - 禁忌搜索：`--tabu-iters`、`--tabu-tenure`
-- RL 相关：`--max-steps-RL`、`--beta`、`--stagnation-penalty`
+- RL 相关：`--max-steps-RL`、`--beta`、`--stagnation-penalty`（仅惩罚真 no-op）、`--reward-scale`
 - 输出：`--output`、`--output-dir`、`--save-fig`、`--save-history`
 - 其他：`--render`
 
@@ -278,7 +278,7 @@ smoke test：
 - DSJC 重复运行：`--dsjc-runs-per-config`
 - 模拟退火：`--sa-iters`、`--initial-temp`、`--cooling-rate`、`--min-temp`
 - 禁忌搜索：`--tabu-iters`、`--tabu-tenure`
-- RL 相关：`--beta`、`--stagnation-penalty`、`--max-steps-rl`
+- RL 相关：`--beta`、`--stagnation-penalty`（仅惩罚真 no-op）、`--reward-scale`、`--max-steps-rl`
 - 输出：`--output-dir`
 
 说明：
