@@ -215,7 +215,8 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="results", help="Output directory")
     parser.add_argument("--save-fig", type=str, default=None, help="Path to save visualization image")
     parser.add_argument("--save-history", type=str, default=None, help="Path to save per-step RL history JSON")
-    parser.add_argument("-B", "--beta", type=float, default=0.2, help="Local search reward weight")
+    parser.add_argument("-B", "--beta", type=float, default=0.1, help="Local search reward weight")
+    parser.add_argument("--stagnation-penalty", type=float, default=1e-3, help="Penalty applied when an RL action does not change conflicts")
     args = parser.parse_args()
 
     graph = read_graph_from_file(args.graph)
@@ -258,6 +259,7 @@ if __name__ == "__main__":
             tabu_tenure=args.tabu_tenure,
             search_algorithm=args.search_algorithm,
             beta=args.beta,
+            stagnation_penalty=args.stagnation_penalty,
             max_episode_steps_RL=args.max_steps_RL,
             render_mode="human" if args.render else None,
         )

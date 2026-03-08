@@ -23,7 +23,8 @@ class GcpEnv(gym.Env):
         tabu_iters=5000,
         tabu_tenure=20,
         search_algorithm="sa",
-        beta=0.2,
+        beta=0.1,
+        stagnation_penalty=0.001,
         render_mode=None,
         base_filename=None,
         sa_init=False,
@@ -114,6 +115,7 @@ class GcpEnv(gym.Env):
 
         self._search_algorithm = search_algorithm
         self._beta = beta
+        self._stagnation_penalty = stagnation_penalty
         self._sa_init = sa_init
         self.render_mode = render_mode
         self._base_filename = base_filename
@@ -198,6 +200,10 @@ class GcpEnv(gym.Env):
                     conflicts += 1
         return conflicts // 2
 
+    def _reward_normalizer(self):
+        edge_count = self._graph.number_of_edges()
+        return edge_count if edge_count > 0 else 1
+
     def _get_obs(self):
         node_features = np.zeros((self._max_nodes, 3), dtype=np.float32)
         col_features = np.zeros((self._max_nodes, self._max_colors, 3), dtype=np.float32)
@@ -254,14 +260,17 @@ class GcpEnv(gym.Env):
         color = int(color)
 
         old_score = self._calculate_conflicts()
+        reward_normalizer = self._reward_normalizer()
 
         if node >= self._n or color >= self._k:
-            immediate_reward = -1.0
+            immediate_reward = -1.0 / reward_normalizer
             new_score = old_score
         else:
             self._solution[node] = color
             new_score = self._calculate_conflicts()
-            immediate_reward = old_score - new_score
+            immediate_reward = (old_score - new_score) / reward_normalizer
+            if new_score == old_score:
+                immediate_reward -= self._stagnation_penalty
 
             if new_score < self._best_score:
                 self._best_score = new_score
@@ -274,7 +283,7 @@ class GcpEnv(gym.Env):
             old_search_score = self._calculate_conflicts()
             self._solution, _ = self._run_local_search()
             new_search_score = self._calculate_conflicts()
-            search_reward = old_search_score - new_search_score
+            search_reward = (old_search_score - new_search_score) / reward_normalizer
             local_search_finished = True
             if new_search_score < self._best_score:
                 self._best_score = new_search_score
