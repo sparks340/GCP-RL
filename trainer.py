@@ -140,8 +140,12 @@ if __name__ == "__main__":
     parser.add_argument("--random-nodes", action="store_true", help="Randomize node count every training episode")
     parser.add_argument("--min-nodes", type=int, default=60, help="Minimum node count when --random-nodes is enabled")
     parser.add_argument("--max-nodes", type=int, default=150, help="Maximum node count when --random-nodes is enabled")
-    parser.add_argument("-B", "--beta", type=float, default=0.2, help="Local search reward weight")
-    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
+    parser.add_argument("-B", "--beta", type=float, default=0.1, help="Local search reward weight")
+    parser.add_argument("--stagnation-penalty", type=float, default=1e-4, help="Penalty applied on true no-op actions (same color, unchanged conflicts)")
+    parser.add_argument("--reward-scale", type=float, default=20.0, help="Global multiplier applied after reward normalization")
+    parser.add_argument("--actor-lr", type=float, default=5e-4, help="Actor learning rate")
+    parser.add_argument("--critic-lr", type=float, default=2e-4, help="Critic learning rate")
+    parser.add_argument("--lr", type=float, default=None, help="Deprecated unified learning rate; overrides both actor/critic rates if set")
     parser.add_argument("--vf-coef", type=float, default=0.25, help="Value loss coefficient")
     parser.add_argument("--ent-coef", type=float, default=0.005, help="Entropy bonus coefficient")
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto", help="Training device selection")
@@ -213,6 +217,8 @@ if __name__ == "__main__":
         tabu_tenure=args.tabu_tenure,
         search_algorithm=args.search_algorithm,
         beta=args.beta,
+        stagnation_penalty=args.stagnation_penalty,
+        reward_scale=args.reward_scale,
         max_episode_steps_RL=args.max_steps_RL,
         max_nodes=max_nodes,
         max_colors=max_colors,
@@ -272,6 +278,9 @@ if __name__ == "__main__":
     )
     sys.stdout.flush()
 
+    actor_lr = args.lr if args.lr is not None else args.actor_lr
+    critic_lr = args.lr if args.lr is not None else args.critic_lr
+
     actor = ActorNetwork(3, 3, device=actor_device, use_gnn=use_gnn).to(actor_device)
     critic = CriticNetwork(
         3,
@@ -281,7 +290,12 @@ if __name__ == "__main__":
         use_gnn=use_gnn,
     ).to(critic_device)
     actor_critic = ActorCritic(actor, critic)
-    optim = torch.optim.Adam(actor_critic.parameters(), lr=args.lr)
+    optim = torch.optim.Adam(
+        [
+            {"params": actor.parameters(), "lr": actor_lr},
+            {"params": critic.parameters(), "lr": critic_lr},
+        ]
+    )
 
     policy = GCPPPOPolicy(
         actor=actor,
@@ -321,6 +335,7 @@ if __name__ == "__main__":
         f"nodes={nodes}\ncolors={colors}\nepochs={args.epochs}\n"
         f"model_type={args.model_type}\nsearch_algorithm={args.search_algorithm}\n"
         f"sa_iters={args.sa_iters}\ntabu_iters={args.tabu_iters}\nbeta={args.beta}\n"
+        f"stagnation_penalty={args.stagnation_penalty}\nreward_scale={args.reward_scale}\nactor_lr={actor_lr}\ncritic_lr={critic_lr}\n"
         f"actor_device={actor_device}\ncritic_device={critic_device}\n"
         f"random_nodes={args.random_nodes}\nmin_nodes={args.min_nodes}\nmax_nodes={args.max_nodes}\n"
         f"train_graph_mode={args.train_graph_mode}\neval_graph_mode={args.eval_graph_mode}\n"

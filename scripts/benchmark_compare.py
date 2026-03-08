@@ -207,6 +207,8 @@ def solve_with_rl(
         tabu_tenure=args.tabu_tenure,
         search_algorithm=search_algorithm,
         beta=args.beta,
+        stagnation_penalty=args.stagnation_penalty,
+        reward_scale=args.reward_scale,
         max_episode_steps_RL=args.max_steps_rl,
         render_mode=None,
     )
@@ -360,7 +362,9 @@ def main() -> None:
     parser.add_argument("--min-temp", type=float, default=0.01, help="SA minimum temperature")
     parser.add_argument("--tabu-iters", type=int, default=5000, help="Tabu iterations")
     parser.add_argument("--tabu-tenure", type=int, default=20, help="Tabu tenure")
-    parser.add_argument("--beta", type=float, default=0.2, help="Local search reward weight for RL mode")
+    parser.add_argument("--beta", type=float, default=0.1, help="Local search reward weight for RL mode")
+    parser.add_argument("--stagnation-penalty", type=float, default=1e-4, help="Penalty applied on true no-op actions (same color, unchanged conflicts)")
+    parser.add_argument("--reward-scale", type=float, default=20.0, help="Global multiplier applied after reward normalization")
     parser.add_argument("--max-steps-rl", type=int, default=300, help="Max RL steps before local search")
     args = parser.parse_args()
 
