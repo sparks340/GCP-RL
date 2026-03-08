@@ -30,6 +30,7 @@ def run_eval_episode(eval_env, policy):
             "node_features": np.expand_dims(obs["node_features"], axis=0),
             "col_features": np.expand_dims(obs["col_features"], axis=0),
             "k": np.array([obs["k"]], dtype=np.int64),
+            "n": np.array([obs["n"]], dtype=np.int64),
         }
         batch = Batch(obs=batched_obs, info={})
         with torch.no_grad():
@@ -84,6 +85,30 @@ def build_graph_factory(nodes, probability, seed=None, fixed_edge_count=False):
     return sample_graph
 
 
+PROBABILITY_COLOR_RULES = (
+    (0.1, 25),
+    (0.5, 7),
+    (0.9, 3),
+)
+
+
+def build_variable_graph_factory(min_nodes, max_nodes, seed=None):
+    seed_seq = np.random.SeedSequence(seed)
+    rng = np.random.default_rng(seed_seq)
+
+    def sample_graph():
+        nodes = int(rng.integers(min_nodes, max_nodes + 1))
+        rule_idx = int(rng.integers(0, len(PROBABILITY_COLOR_RULES)))
+        probability, color_divisor = PROBABILITY_COLOR_RULES[rule_idx]
+        graph_seed = int(rng.integers(0, 2**32 - 1, dtype=np.uint32))
+        graph = nx.gnp_random_graph(nodes, probability, seed=graph_seed)
+        graph.graph["edge_probability"] = float(probability)
+        graph.graph["color_divisor"] = int(color_divisor)
+        return graph
+
+    return sample_graph
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PPO trainer for graph coloring")
     parser.add_argument("output", type=str, help="Path to output policy file")
@@ -112,6 +137,9 @@ if __name__ == "__main__":
     parser.add_argument("-N", "--nodes", type=int, default=250, help="Training graph node count")
     parser.add_argument("-P", "--probability", type=float, default=0.5, help="Erdos-Renyi edge probability")
     parser.add_argument("-K", "--colors", type=int, default=24, help="Number of colors")
+    parser.add_argument("--random-nodes", action="store_true", help="Randomize node count every training episode")
+    parser.add_argument("--min-nodes", type=int, default=60, help="Minimum node count when --random-nodes is enabled")
+    parser.add_argument("--max-nodes", type=int, default=150, help="Maximum node count when --random-nodes is enabled")
     parser.add_argument("-B", "--beta", type=float, default=0.2, help="Local search reward weight")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--vf-coef", type=float, default=0.25, help="Value loss coefficient")
@@ -137,17 +165,46 @@ if __name__ == "__main__":
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps_RL)
 
-    nodes, probability, colors = args.nodes, args.probability, args.colors
-    use_fixed_edge_count = args.train_graph_mode == "multi" or args.eval_graph_mode == "multi"
-    graph_factory = build_graph_factory(
-        nodes,
-        probability,
-        args.graph_seed,
-        fixed_edge_count=use_fixed_edge_count,
-    )
+    if args.random_nodes:
+        if args.min_nodes <= 0 or args.max_nodes <= 0:
+            raise ValueError("--min-nodes and --max-nodes must be positive")
+        if args.min_nodes > args.max_nodes:
+            raise ValueError(f"--min-nodes ({args.min_nodes}) cannot be greater than --max-nodes ({args.max_nodes})")
+
+    if args.random_nodes and args.train_graph_mode != "multi":
+        print("[Info] --random-nodes enabled: overriding --train-graph-mode to multi for per-episode resampling.")
+        args.train_graph_mode = "multi"
+
+    probability = args.probability
+    use_fixed_edge_count = (args.train_graph_mode == "multi" or args.eval_graph_mode == "multi") and not args.random_nodes
+
+    if args.random_nodes:
+        min_nodes = args.min_nodes
+        max_nodes = args.max_nodes
+        max_colors = max(1, max_nodes // 3)
+        graph_factory = build_variable_graph_factory(
+            min_nodes,
+            max_nodes,
+            args.graph_seed,
+        )
+        base_graph = graph_factory()
+        nodes = max_nodes
+        colors = max_colors
+    else:
+        nodes = args.nodes
+        colors = args.colors
+        max_nodes = nodes
+        max_colors = colors
+        graph_factory = build_graph_factory(
+            nodes,
+            probability,
+            args.graph_seed,
+            fixed_edge_count=use_fixed_edge_count,
+        )
+        base_graph = graph_factory()
 
     env_kwargs = dict(
-        k=colors,
+        k=max_colors,
         sa_iters=args.sa_iters,
         initial_temp=args.initial_temp,
         cooling_rate=args.cooling_rate,
@@ -157,9 +214,10 @@ if __name__ == "__main__":
         search_algorithm=args.search_algorithm,
         beta=args.beta,
         max_episode_steps_RL=args.max_steps_RL,
+        max_nodes=max_nodes,
+        max_colors=max_colors,
+        k_sampler=(lambda n, g: max(1, n // int(g.graph.get("color_divisor", 5)))) if args.random_nodes else None,
     )
-
-    base_graph = graph_factory()
 
     def make_train_env_fn():
         if args.train_graph_mode == "multi":
@@ -201,6 +259,13 @@ if __name__ == "__main__":
     use_gnn = args.model_type == "gnn"
 
     print(f"Using actor_device={actor_device}, critic_device={critic_device}")
+    if args.random_nodes:
+        print(
+            f"Training graph size: per-episode random nodes in [{args.min_nodes}, {args.max_nodes}], "
+            f"rules: p=0.5->n//7, p=0.1->n//25, p=0.9->n//3 (max_colors={max_colors})"
+        )
+    else:
+        print(f"Training graph size: nodes={nodes}, colors={colors} (random_nodes={args.random_nodes})")
     print(
         f"Graph mode: train={args.train_graph_mode}, eval={args.eval_graph_mode}, "
         f"graph_seed={args.graph_seed}, fixed_edge_count={use_fixed_edge_count}"
@@ -223,8 +288,8 @@ if __name__ == "__main__":
         critic=critic,
         optim=optim,
         dist_fn=lambda logits: torch.distributions.Categorical(logits=logits),
-        nodes=nodes,
-        k=colors,
+        nodes=max_nodes,
+        k=max_colors,
         action_space=env.action_space,
         eps_clip=0.2,
         dual_clip=None,
@@ -244,17 +309,20 @@ if __name__ == "__main__":
     train_collector = Collector(policy, train_envs, replay_buffer)
     test_collector = Collector(policy, test_envs)
 
+    node_log_name = f"{args.min_nodes}-{args.max_nodes}" if args.random_nodes else str(nodes)
+    color_log_name = "profiled_colors" if args.random_nodes else str(colors)
     log_path = (
-        f"./log/gcp_train_{args.nodes}nodes_{args.colors}colors_"
+        f"./log/gcp_train_{node_log_name}nodes_{color_log_name}colors_"
         f"{args.epochs}epochs_{args.model_type}_{args.search_algorithm}_{time.strftime('%Y%m%d_%H%M%S')}"
     )
     writer = SummaryWriter(log_path)
     writer.add_text(
         "config",
-        f"nodes={args.nodes}\ncolors={args.colors}\nepochs={args.epochs}\n"
+        f"nodes={nodes}\ncolors={colors}\nepochs={args.epochs}\n"
         f"model_type={args.model_type}\nsearch_algorithm={args.search_algorithm}\n"
         f"sa_iters={args.sa_iters}\ntabu_iters={args.tabu_iters}\nbeta={args.beta}\n"
         f"actor_device={actor_device}\ncritic_device={critic_device}\n"
+        f"random_nodes={args.random_nodes}\nmin_nodes={args.min_nodes}\nmax_nodes={args.max_nodes}\n"
         f"train_graph_mode={args.train_graph_mode}\neval_graph_mode={args.eval_graph_mode}\n"
         f"graph_seed={args.graph_seed}\nfixed_edge_count={use_fixed_edge_count}",
     )
