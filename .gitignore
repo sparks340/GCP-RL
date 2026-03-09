@@ -9,9 +9,6 @@ __pycache__/
 .venv/
 venv/
 
-# data
-data/
-
 # IDE
 .vscode/
 .idea/
