@@ -86,6 +86,17 @@ def existing_dsjc_specs(data_dir: Path, readme_path: Path) -> List[DatasetSpec]:
     return specs
 
 
+
+
+def random_graph_colors(probability: float, nodes: int) -> int:
+    if abs(probability - 0.1) < 1e-9:
+        return max(3, nodes // 25 + 1)
+    if abs(probability - 0.3) < 1e-9:
+        return max(4, nodes // 15 + 1)
+    if abs(probability - 0.5) < 1e-9:
+        return max(6, nodes // 7 - 1)
+    return max(1, nodes // 5)
+
 def random_specs(
     min_nodes: int,
     max_nodes: int,
@@ -102,7 +113,7 @@ def random_specs(
             graph_seed = base_seed + config_index * 1000 + trial_id
             nodes_rng = random.Random(graph_seed)
             nodes = nodes_rng.randint(min_nodes, max_nodes)
-            colors = max(1, nodes // 5)
+            colors = random_graph_colors(probability, nodes)
             specs.append(
                 DatasetSpec(
                     dataset_type="random",

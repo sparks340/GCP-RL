@@ -1,6 +1,8 @@
 import argparse
+import re
 import sys
 import time
+from pathlib import Path
 
 import gymnasium as gym
 import networkx as nx
@@ -68,45 +70,88 @@ def run_eval_episode(eval_env, policy):
     return history, total_reward
 
 
-def build_graph_factory(nodes, probability, seed=None, fixed_edge_count=False):
+
+
+
+def read_dimacs_graph(filename):
+    edges = []
+    n = 0
+    with open(filename, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("p"):
+                _, _, nodes, _ = line.split()
+                n = int(nodes)
+            elif line.startswith("e"):
+                _, u, v = line.split()
+                edges.append((int(u) - 1, int(v) - 1))
+    graph = nx.Graph()
+    graph.add_nodes_from(range(n))
+    graph.add_edges_from(edges)
+    return graph
+
+def parse_dsjc_readme(readme_path):
+    mapping = {}
+    with open(readme_path, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            parts = raw_line.strip().split()
+            if len(parts) >= 2:
+                mapping[parts[0]] = int(parts[1])
+    return mapping
+
+
+def parse_graph_metadata(name: str):
+    stem = name[:-4] if name.endswith(".col") else name
+
+    if stem.startswith("DSJC"):
+        body = stem[len("DSJC") :]
+        nodes_str, _ = body.split(".")
+        return int(nodes_str)
+
+    n_match = re.search(r"(?:^|[_-])n(\d+)(?:$|[_-])", stem)
+    if n_match:
+        return int(n_match.group(1))
+
+    raise ValueError(
+        f"Unsupported graph name '{name}'. Expected DSJC***.* or token n<node_count> in filename."
+    )
+
+
+def load_graph_library(data_dir, seed=None):
+    data_dir = Path(data_dir)
+    readme_path = data_dir / "ReadMe.txt"
+    if not readme_path.exists():
+        raise FileNotFoundError(f"ReadMe.txt not found under graph library: {data_dir}")
+
+    color_map = parse_dsjc_readme(readme_path)
+    graph_records = []
+    max_nodes = 0
+    max_colors = 1
+
+    for dataset_name, colors in color_map.items():
+        graph_path = data_dir / f"{dataset_name}.col"
+        if not graph_path.exists():
+            continue
+        nodes = parse_graph_metadata(dataset_name)
+        graph_records.append((graph_path, nodes, int(colors)))
+        max_nodes = max(max_nodes, nodes)
+        max_colors = max(max_colors, int(colors))
+
+    if not graph_records:
+        raise ValueError(f"No valid .col graphs found under {data_dir}")
+
     seed_seq = np.random.SeedSequence(seed)
     rng = np.random.default_rng(seed_seq)
 
-    max_undirected_edges = nodes * (nodes - 1) // 2
-    target_edges = int(round(probability * max_undirected_edges))
-    target_edges = max(0, min(target_edges, max_undirected_edges))
-
     def sample_graph():
-        graph_seed = int(rng.integers(0, 2**32 - 1, dtype=np.uint32))
-        if fixed_edge_count:
-            return nx.gnm_random_graph(nodes, target_edges, seed=graph_seed)
-        return nx.gnp_random_graph(nodes, probability, seed=graph_seed)
-
-    return sample_graph
-
-
-PROBABILITY_COLOR_RULES = (
-    (0.1, 25),
-    (0.5, 7),
-    (0.9, 3),
-)
-
-
-def build_variable_graph_factory(min_nodes, max_nodes, seed=None):
-    seed_seq = np.random.SeedSequence(seed)
-    rng = np.random.default_rng(seed_seq)
-
-    def sample_graph():
-        nodes = int(rng.integers(min_nodes, max_nodes + 1))
-        rule_idx = int(rng.integers(0, len(PROBABILITY_COLOR_RULES)))
-        probability, color_divisor = PROBABILITY_COLOR_RULES[rule_idx]
-        graph_seed = int(rng.integers(0, 2**32 - 1, dtype=np.uint32))
-        graph = nx.gnp_random_graph(nodes, probability, seed=graph_seed)
-        graph.graph["edge_probability"] = float(probability)
-        graph.graph["color_divisor"] = int(color_divisor)
+        graph_idx = int(rng.integers(0, len(graph_records)))
+        graph_path, _, colors = graph_records[graph_idx]
+        graph = read_dimacs_graph(graph_path)
+        graph.graph["recommended_colors"] = int(colors)
+        graph.graph["dataset_name"] = graph_path.stem
         return graph
 
-    return sample_graph
+    return sample_graph, max_nodes, max_colors, len(graph_records)
+
 
 
 if __name__ == "__main__":
@@ -134,12 +179,6 @@ if __name__ == "__main__":
     parser.add_argument("--repeat-per-collect", type=int, default=10, help="Gradient update rounds per collection")
     parser.add_argument("--batch-size", type=int, default=256, help="PPO minibatch size")
     parser.add_argument("--episode-per-test", type=int, default=8, help="Evaluation episodes per epoch")
-    parser.add_argument("-N", "--nodes", type=int, default=250, help="Training graph node count")
-    parser.add_argument("-P", "--probability", type=float, default=0.5, help="Erdos-Renyi edge probability")
-    parser.add_argument("-K", "--colors", type=int, default=24, help="Number of colors")
-    parser.add_argument("--random-nodes", action="store_true", help="Randomize node count every training episode")
-    parser.add_argument("--min-nodes", type=int, default=60, help="Minimum node count when --random-nodes is enabled")
-    parser.add_argument("--max-nodes", type=int, default=150, help="Maximum node count when --random-nodes is enabled")
     parser.add_argument("-B", "--beta", type=float, default=0.1, help="Local search reward weight")
     parser.add_argument("--stagnation-penalty", type=float, default=1e-4, help="Penalty applied on true no-op actions (same color, unchanged conflicts)")
     parser.add_argument("--reward-scale", type=float, default=20.0, help="Global multiplier applied after reward normalization")
@@ -152,60 +191,18 @@ if __name__ == "__main__":
     parser.add_argument("--split-gpus", action="store_true", help="Split actor/critic across cuda:0 and cuda:1 when available")
     parser.add_argument("--actor-device", type=str, default=None, help="Override actor device, e.g. cuda:0")
     parser.add_argument("--critic-device", type=str, default=None, help="Override critic device, e.g. cuda:1")
-    parser.add_argument(
-        "--train-graph-mode",
-        choices=["single", "multi"],
-        default="single",
-        help="single: fixed graph for all training episodes; multi: resample a new graph each reset (with fixed edge count)",
-    )
-    parser.add_argument(
-        "--eval-graph-mode",
-        choices=["single", "multi"],
-        default="single",
-        help="single: fixed evaluation graph(s); multi: resample new graph at each evaluation reset (with fixed edge count)",
-    )
     parser.add_argument("--graph-seed", type=int, default=None, help="Random seed for graph generation")
+    parser.add_argument("--graph-library-dir", type=str, default="data", help="Directory containing DSJC .col files and ReadMe.txt")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps_RL)
 
-    if args.random_nodes:
-        if args.min_nodes <= 0 or args.max_nodes <= 0:
-            raise ValueError("--min-nodes and --max-nodes must be positive")
-        if args.min_nodes > args.max_nodes:
-            raise ValueError(f"--min-nodes ({args.min_nodes}) cannot be greater than --max-nodes ({args.max_nodes})")
-
-    if args.random_nodes and args.train_graph_mode != "multi":
-        print("[Info] --random-nodes enabled: overriding --train-graph-mode to multi for per-episode resampling.")
-        args.train_graph_mode = "multi"
-
-    probability = args.probability
-    use_fixed_edge_count = (args.train_graph_mode == "multi" or args.eval_graph_mode == "multi") and not args.random_nodes
-
-    if args.random_nodes:
-        min_nodes = args.min_nodes
-        max_nodes = args.max_nodes
-        max_colors = max(1, max_nodes // 3)
-        graph_factory = build_variable_graph_factory(
-            min_nodes,
-            max_nodes,
-            args.graph_seed,
-        )
-        base_graph = graph_factory()
-        nodes = max_nodes
-        colors = max_colors
-    else:
-        nodes = args.nodes
-        colors = args.colors
-        max_nodes = nodes
-        max_colors = colors
-        graph_factory = build_graph_factory(
-            nodes,
-            probability,
-            args.graph_seed,
-            fixed_edge_count=use_fixed_edge_count,
-        )
-        base_graph = graph_factory()
+    graph_factory, max_nodes, max_colors, graph_count = load_graph_library(
+        args.graph_library_dir,
+        args.graph_seed,
+    )
+    nodes = max_nodes
+    colors = max_colors
 
     env_kwargs = dict(
         k=max_colors,
@@ -222,18 +219,14 @@ if __name__ == "__main__":
         max_episode_steps_RL=args.max_steps_RL,
         max_nodes=max_nodes,
         max_colors=max_colors,
-        k_sampler=(lambda n, g: max(1, n // int(g.graph.get("color_divisor", 5)))) if args.random_nodes else None,
+        k_sampler=(lambda n, g: int(g.graph.get("recommended_colors", max_colors))),
     )
 
     def make_train_env_fn():
-        if args.train_graph_mode == "multi":
-            return GcpEnv(graph=graph_factory(), graph_sampler=graph_factory, resample_on_reset=True, **env_kwargs)
-        return GcpEnv(graph=base_graph.copy(), **env_kwargs)
+        return GcpEnv(graph=graph_factory(), graph_sampler=graph_factory, resample_on_reset=True, **env_kwargs)
 
     def make_test_env_fn():
-        if args.eval_graph_mode == "multi":
-            return GcpEnv(graph=graph_factory(), graph_sampler=graph_factory, resample_on_reset=True, **env_kwargs)
-        return GcpEnv(graph=base_graph.copy(), **env_kwargs)
+        return GcpEnv(graph=graph_factory(), graph_sampler=graph_factory, resample_on_reset=True, **env_kwargs)
 
     env = make_train_env_fn()
     train_envs = DummyVectorEnv([make_train_env_fn for _ in range(args.train_env_num)])
@@ -265,16 +258,9 @@ if __name__ == "__main__":
     use_gnn = args.model_type == "gnn"
 
     print(f"Using actor_device={actor_device}, critic_device={critic_device}")
-    if args.random_nodes:
-        print(
-            f"Training graph size: per-episode random nodes in [{args.min_nodes}, {args.max_nodes}], "
-            f"rules: p=0.5->n//7, p=0.1->n//25, p=0.9->n//3 (max_colors={max_colors})"
-        )
-    else:
-        print(f"Training graph size: nodes={nodes}, colors={colors} (random_nodes={args.random_nodes})")
     print(
-        f"Graph mode: train={args.train_graph_mode}, eval={args.eval_graph_mode}, "
-        f"graph_seed={args.graph_seed}, fixed_edge_count={use_fixed_edge_count}"
+        f"Training graph source: library ({args.graph_library_dir}), "
+        f"graphs={graph_count}, max_nodes={max_nodes}, max_colors={max_colors}, graph_seed={args.graph_seed}"
     )
     sys.stdout.flush()
 
@@ -323,8 +309,8 @@ if __name__ == "__main__":
     train_collector = Collector(policy, train_envs, replay_buffer)
     test_collector = Collector(policy, test_envs)
 
-    node_log_name = f"{args.min_nodes}-{args.max_nodes}" if args.random_nodes else str(nodes)
-    color_log_name = "profiled_colors" if args.random_nodes else str(colors)
+    node_log_name = "library"
+    color_log_name = "profiled_colors"
     log_path = (
         f"./log/gcp_train_{node_log_name}nodes_{color_log_name}colors_"
         f"{args.epochs}epochs_{args.model_type}_{args.search_algorithm}_{time.strftime('%Y%m%d_%H%M%S')}"
@@ -337,9 +323,8 @@ if __name__ == "__main__":
         f"sa_iters={args.sa_iters}\ntabu_iters={args.tabu_iters}\nbeta={args.beta}\n"
         f"stagnation_penalty={args.stagnation_penalty}\nreward_scale={args.reward_scale}\nactor_lr={actor_lr}\ncritic_lr={critic_lr}\n"
         f"actor_device={actor_device}\ncritic_device={critic_device}\n"
-        f"random_nodes={args.random_nodes}\nmin_nodes={args.min_nodes}\nmax_nodes={args.max_nodes}\n"
-        f"train_graph_mode={args.train_graph_mode}\neval_graph_mode={args.eval_graph_mode}\n"
-        f"graph_seed={args.graph_seed}\nfixed_edge_count={use_fixed_edge_count}",
+        f"graph_library_dir={args.graph_library_dir}\n"
+        f"graph_count={graph_count}\ngraph_seed={args.graph_seed}",
     )
     logger = TensorboardLogger(writer, train_interval=1, update_interval=1)
 
