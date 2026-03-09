@@ -87,49 +87,6 @@ def existing_dsjc_specs(data_dir: Path, readme_path: Path) -> List[DatasetSpec]:
 
 
 
-
-def random_graph_colors(probability: float, nodes: int) -> int:
-    if abs(probability - 0.1) < 1e-9:
-        return max(3, nodes // 25 + 1)
-    if abs(probability - 0.3) < 1e-9:
-        return max(4, nodes // 15 + 1)
-    if abs(probability - 0.5) < 1e-9:
-        return max(6, nodes // 7 - 1)
-    return max(1, nodes // 5)
-
-def random_specs(
-    min_nodes: int,
-    max_nodes: int,
-    probabilities: Sequence[float],
-    instances_per_config: int,
-    base_seed: int,
-) -> List[DatasetSpec]:
-    if min_nodes > max_nodes:
-        raise ValueError(f"random node range is invalid: min_nodes={min_nodes}, max_nodes={max_nodes}")
-    specs: List[DatasetSpec] = []
-    for config_index, probability in enumerate(probabilities):
-        config_name = f"ER_n{min_nodes}-{max_nodes}_p{probability:.1f}"
-        for trial_id in range(instances_per_config):
-            graph_seed = base_seed + config_index * 1000 + trial_id
-            nodes_rng = random.Random(graph_seed)
-            nodes = nodes_rng.randint(min_nodes, max_nodes)
-            colors = random_graph_colors(probability, nodes)
-            specs.append(
-                DatasetSpec(
-                    dataset_type="random",
-                    dataset_name=f"{config_name}_trial{trial_id + 1}",
-                    config_name=config_name,
-                    graph_path=None,
-                    nodes=nodes,
-                    probability=probability,
-                    colors=colors,
-                    trial_id=trial_id,
-                    graph_seed=graph_seed,
-                )
-            )
-    return specs
-
-
 def expand_dsjc_specs(base_specs: Sequence[DatasetSpec], runs_per_config: int) -> List[DatasetSpec]:
     specs: List[DatasetSpec] = []
     for spec in base_specs:
@@ -156,9 +113,6 @@ def filter_specs_by_name(specs: Sequence[DatasetSpec], dataset_names: Optional[S
     allowed = set(dataset_names)
     return [spec for spec in specs if spec.config_name in allowed]
 
-
-def make_random_graph(nodes: int, probability: float, seed: int) -> nx.Graph:
-    return nx.gnp_random_graph(nodes, probability, seed=seed)
 
 
 def build_policy(policy_path: Path, nodes: int, colors: int, model_type: str, device: torch.device):
@@ -339,25 +293,13 @@ def print_summary(label: str, rows: Iterable[Dict]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark RL+local-search vs local-search-only on random and DSJC graphs")
+    parser = argparse.ArgumentParser(description="Benchmark RL+local-search vs local-search-only on data directory graphs")
     parser.add_argument("--policy", type=str, required=True, help="Path to trained policy .pth")
     parser.add_argument("--model-type", choices=["gnn", "mlp"], default="gnn", help="Policy model type")
     parser.add_argument("--search-algorithm", choices=["sa", "tabu"], default="sa", help="Local search algorithm")
     parser.add_argument("--data-dir", type=str, default="data", help="Directory containing DSJC .col files")
     parser.add_argument("--readme-path", type=str, default="data/ReadMe.txt", help="DSJC color mapping file")
-    parser.add_argument("--include-random", action="store_true", help="Include random graphs")
-    parser.add_argument("--include-dsjc", action="store_true", help="Include DSJC graphs")
-    parser.add_argument("--random-instances-per-config", type=int, default=20, help="Random graphs per config")
     parser.add_argument("--dsjc-runs-per-config", type=int, default=20, help="Runs per DSJC config")
-    parser.add_argument("--random-min-nodes", type=int, default=60, help="Minimum nodes for pure random graphs")
-    parser.add_argument("--random-max-nodes", type=int, default=120, help="Maximum nodes for pure random graphs")
-    parser.add_argument(
-        "--random-probabilities",
-        type=float,
-        nargs="+",
-        default=[0.1, 0.5, 0.9],
-        help="Edge probabilities for pure random Erdos-Renyi graphs",
-    )
     parser.add_argument("--seed", type=int, default=1234, help="Base random seed")
     parser.add_argument("--output-dir", type=str, default="results/benchmark_compare", help="Output directory")
     parser.add_argument(
@@ -379,9 +321,6 @@ def main() -> None:
     parser.add_argument("--max-steps-rl", type=int, default=300, help="Max RL steps before local search")
     args = parser.parse_args()
 
-    if not args.include_random and not args.include_dsjc:
-        args.include_random = True
-        args.include_dsjc = True
 
     policy_path = Path(args.policy)
     if not policy_path.exists():
@@ -391,45 +330,20 @@ def main() -> None:
     readme_path = Path(args.readme_path)
     output_dir = Path(args.output_dir)
 
-    if args.random_min_nodes <= 0 or args.random_max_nodes <= 0:
-        raise SystemExit("--random-min-nodes and --random-max-nodes must be positive integers.")
-    if args.random_min_nodes > args.random_max_nodes:
-        raise SystemExit("--random-min-nodes must be less than or equal to --random-max-nodes.")
-    if any(probability <= 0.0 or probability >= 1.0 for probability in args.random_probabilities):
-        raise SystemExit("--random-probabilities must all be between 0 and 1.")
 
-    dsjc_specs = (
-        expand_dsjc_specs(existing_dsjc_specs(data_dir, readme_path), args.dsjc_runs_per_config)
-        if args.include_dsjc
-        else []
+    specs = filter_specs_by_name(
+        expand_dsjc_specs(existing_dsjc_specs(data_dir, readme_path), args.dsjc_runs_per_config),
+        args.dataset_names,
     )
-    random_dataset_specs = (
-        random_specs(
-            args.random_min_nodes,
-            args.random_max_nodes,
-            args.random_probabilities,
-            args.random_instances_per_config,
-            args.seed,
-        )
-        if args.include_random
-        else []
-    )
-    dsjc_specs = filter_specs_by_name(dsjc_specs, args.dataset_names)
-    random_dataset_specs = filter_specs_by_name(random_dataset_specs, args.dataset_names)
-
-    specs = [*random_dataset_specs, *dsjc_specs]
     if not specs:
-        raise SystemExit("No datasets found. Check data directory and ReadMe.txt.")
+        raise SystemExit("No datasets found under data directory and ReadMe.txt.")
 
     records: List[Dict] = []
     total_runs = len(specs) * 2
     run_index = 0
 
     for spec in specs:
-        if spec.dataset_type == "random":
-            graph = make_random_graph(spec.nodes, float(spec.probability), int(spec.graph_seed))
-        else:
-            graph = read_graph_from_file(str(spec.graph_path))
+        graph = read_graph_from_file(str(spec.graph_path))
 
         for method in ("rl_local_search", "local_search_only"):
             run_index += 1
