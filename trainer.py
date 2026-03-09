@@ -98,6 +98,21 @@ def parse_dsjc_readme(readme_path):
                 mapping[parts[0]] = int(parts[1])
     return mapping
 
+    candidate_text = ", ".join(str(c) for c in candidates)
+    raise FileNotFoundError(
+        "ReadMe.txt not found in graph library path candidates: "
+        f"{candidate_text}. "
+        "Please set --traindata to a valid library directory, "
+        "or generate one via scripts/generate_training_data.py."
+    )
+
+
+def resolve_cli_graph_library_dir(args):
+    if args.traindata:
+        return args.traindata
+
+    entered = input("请输入训练图库目录（包含 ReadMe.txt 和 .col，默认 data/train_data）: ").strip()
+    return entered or "data/train_data"
 
 def parse_graph_metadata(name: str):
     stem = name[:-4] if name.endswith(".col") else name
@@ -132,17 +147,29 @@ def resolve_graph_library_dir(data_dir):
     raise FileNotFoundError(
         "ReadMe.txt not found in graph library path candidates: "
         f"{candidate_text}. "
-        "Please set --traindata to a valid library directory, "
+        "Please set --input_data to a valid library directory, "
         "or generate one via scripts/generate_training_data.py."
     )
 
+    color_map = parse_dsjc_readme(readme_path)
+    graph_records = []
+    max_nodes = 0
+    max_colors = 1
+
+    for dataset_name, colors in color_map.items():
+        graph_path = data_dir / f"{dataset_name}.col"
+        if not graph_path.exists():
+            continue
+        nodes = parse_graph_metadata(dataset_name)
+        graph_records.append((graph_path, nodes, int(colors)))
+        max_nodes = max(max_nodes, nodes)
+        max_colors = max(max_colors, int(colors))
+
+    if not graph_records:
+        raise ValueError(f"No valid .col graphs found under {data_dir}")
 
 def resolve_cli_graph_library_dir(args):
-    if args.traindata:
-        return args.traindata
-
-    entered = input("请输入训练图库目录（包含 ReadMe.txt 和 .col，默认 data/train_data）: ").strip()
-    return entered or "data/train_data"
+    return args.input_data
 
 def load_graph_library(data_dir, seed=None):
     data_dir = resolve_graph_library_dir(data_dir)
@@ -218,7 +245,7 @@ if __name__ == "__main__":
     parser.add_argument("--actor-device", type=str, default=None, help="Override actor device, e.g. cuda:0")
     parser.add_argument("--critic-device", type=str, default=None, help="Override critic device, e.g. cuda:1")
     parser.add_argument("--graph-seed", type=int, default=None, help="Random seed for graph generation")
-    parser.add_argument("--traindata", type=str, default=None, help="Training graph library directory containing .col files and ReadMe.txt")
+    parser.add_argument("--input_data", type=str, default="data/train_data", help="Training graph library directory containing .col files and ReadMe.txt")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps_RL)
