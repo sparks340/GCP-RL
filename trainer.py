@@ -152,12 +152,12 @@ if __name__ == "__main__":
     parser.add_argument("--input", type=str, default=None, help="Path to input policy file")
     parser.add_argument("-I", "--max_steps_RL", type=int, default=300, help="Max RL steps in each episode")
 
-    parser.add_argument("-S", "--sa-iters", type=int, default=500000, help="SA iterations")
-    parser.add_argument("-T", "--initial-temp", type=float, default=500.0, help="SA initial temperature")
-    parser.add_argument("-C", "--cooling-rate", type=float, default=0.995, help="SA cooling rate")
-    parser.add_argument("-M", "--min-temp", type=float, default=0.01, help="SA minimum temperature")
+    parser.add_argument("-S", "--sa-iters", type=int, default=10000, help="SA iterations")
+    parser.add_argument("-T", "--initial-temp", type=float, default=1000.0, help="SA initial temperature")
+    parser.add_argument("-C", "--cooling-rate", type=float, default=0.99, help="SA cooling rate")
+    parser.add_argument("-M", "--min-temp", type=float, default=1e-8, help="SA minimum temperature")
 
-    parser.add_argument("--tabu-iters", type=int, default=5000, help="Tabu search iterations")
+    parser.add_argument("--tabu-iters", type=int, default=10000, help="Tabu search iterations")
     parser.add_argument("--tabu-tenure", type=int, default=20, help="Tabu tenure")
     parser.add_argument("--search-algorithm", choices=["sa", "tabu"], default="sa", help="Local search algorithm")
 

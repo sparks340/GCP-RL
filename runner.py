@@ -200,12 +200,12 @@ if __name__ == "__main__":
     parser.add_argument("--model-type", choices=["gnn", "mlp"], default="gnn", help="Model type")
 
     parser.add_argument("-K", "--colors", type=int, default=None, help="Number of colors")
-    parser.add_argument("-S", "--sa-iters", type=int, default=5000000, help="SA iterations")
-    parser.add_argument("-T", "--initial-temp", type=float, default=500.0, help="Initial temperature")
-    parser.add_argument("-C", "--cooling-rate", type=float, default=0.995, help="Cooling rate")
-    parser.add_argument("-M", "--min-temp", type=float, default=0.01, help="Minimum temperature")
+    parser.add_argument("-S", "--sa-iters", type=int, default=10000, help="SA iterations")
+    parser.add_argument("-T", "--initial-temp", type=float, default=1000.0, help="Initial temperature")
+    parser.add_argument("-C", "--cooling-rate", type=float, default=0.99, help="Cooling rate")
+    parser.add_argument("-M", "--min-temp", type=float, default=1e-8, help="Minimum temperature")
 
-    parser.add_argument("--tabu-iters", type=int, default=5000, help="Tabu search iterations")
+    parser.add_argument("--tabu-iters", type=int, default=10000, help="Tabu search iterations")
     parser.add_argument("--tabu-tenure", type=int, default=20, help="Tabu tenure")
     parser.add_argument("--search-algorithm", choices=["sa", "tabu"], default="sa", help="Local search algorithm")
 
