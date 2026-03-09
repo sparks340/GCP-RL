@@ -100,7 +100,6 @@ python trainer.py checkpoints/policy_v2.pth \
   - 图库图：`--input_data`
 - 奖励与优化：`--beta`、`--stagnation-penalty`（仅惩罚真 no-op）、`--reward-scale`、`--actor-lr`、`--critic-lr`、`--lr`（兼容旧参数） 、`--vf-coef`、`--ent-coef`
 - 设备：`--device {auto,cpu,cuda}`、`--split-gpus`、`--actor-device`、`--critic-device`
-- 图采样与随机种子：`--graph-seed`
 
 说明：
 

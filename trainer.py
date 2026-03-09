@@ -98,40 +98,6 @@ def parse_dsjc_readme(readme_path):
                 mapping[parts[0]] = int(parts[1])
     return mapping
 
-    candidate_text = ", ".join(str(c) for c in candidates)
-    raise FileNotFoundError(
-        "ReadMe.txt not found in graph library path candidates: "
-        f"{candidate_text}. "
-        "Please set --traindata to a valid library directory, "
-        "or generate one via scripts/generate_training_data.py."
-    )
-
-
-def resolve_cli_graph_library_dir(args):
-    if args.traindata:
-        return args.traindata
-
-    entered = input("请输入训练图库目录（包含 ReadMe.txt 和 .col，默认 data/train_data）: ").strip()
-    return entered or "data/train_data"
-
-def parse_graph_metadata(name: str):
-    stem = name[:-4] if name.endswith(".col") else name
-
-    if stem.startswith("DSJC"):
-        body = stem[len("DSJC") :]
-        nodes_str, _ = body.split(".")
-        return int(nodes_str)
-
-    n_match = re.search(r"(?:^|[_-])n(\d+)(?:$|[_-])", stem)
-    if n_match:
-        return int(n_match.group(1))
-
-    raise ValueError(
-        f"Unsupported graph name '{name}'. Expected DSJC***.* or token n<node_count> in filename."
-    )
-
-
-
 
 def resolve_graph_library_dir(data_dir):
     requested = Path(data_dir)
@@ -151,27 +117,8 @@ def resolve_graph_library_dir(data_dir):
         "or generate one via scripts/generate_training_data.py."
     )
 
-    color_map = parse_dsjc_readme(readme_path)
-    graph_records = []
-    max_nodes = 0
-    max_colors = 1
 
-    for dataset_name, colors in color_map.items():
-        graph_path = data_dir / f"{dataset_name}.col"
-        if not graph_path.exists():
-            continue
-        nodes = parse_graph_metadata(dataset_name)
-        graph_records.append((graph_path, nodes, int(colors)))
-        max_nodes = max(max_nodes, nodes)
-        max_colors = max(max_colors, int(colors))
-
-    if not graph_records:
-        raise ValueError(f"No valid .col graphs found under {data_dir}")
-
-def resolve_cli_graph_library_dir(args):
-    return args.input_data
-
-def load_graph_library(data_dir, seed=None):
+def load_graph_library(data_dir):
     data_dir = resolve_graph_library_dir(data_dir)
     readme_path = data_dir / "ReadMe.txt"
 
@@ -184,7 +131,7 @@ def load_graph_library(data_dir, seed=None):
         graph_path = data_dir / f"{dataset_name}.col"
         if not graph_path.exists():
             continue
-        nodes = parse_graph_metadata(dataset_name)
+        nodes = read_dimacs_graph(graph_path).number_of_nodes()
         graph_records.append((graph_path, nodes, int(colors)))
         max_nodes = max(max_nodes, nodes)
         max_colors = max(max_colors, int(colors))
@@ -192,8 +139,7 @@ def load_graph_library(data_dir, seed=None):
     if not graph_records:
         raise ValueError(f"No valid .col graphs found under {data_dir}")
 
-    seed_seq = np.random.SeedSequence(seed)
-    rng = np.random.default_rng(seed_seq)
+    rng = np.random.default_rng()
 
     def sample_graph():
         graph_idx = int(rng.integers(0, len(graph_records)))
@@ -244,17 +190,13 @@ if __name__ == "__main__":
     parser.add_argument("--split-gpus", action="store_true", help="Split actor/critic across cuda:0 and cuda:1 when available")
     parser.add_argument("--actor-device", type=str, default=None, help="Override actor device, e.g. cuda:0")
     parser.add_argument("--critic-device", type=str, default=None, help="Override critic device, e.g. cuda:1")
-    parser.add_argument("--graph-seed", type=int, default=None, help="Random seed for graph generation")
     parser.add_argument("--input_data", type=str, default="data/train_data", help="Training graph library directory containing .col files and ReadMe.txt")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps_RL)
 
-    graph_library_dir = resolve_cli_graph_library_dir(args)
-    graph_factory, max_nodes, max_colors, graph_count = load_graph_library(
-        graph_library_dir,
-        args.graph_seed,
-    )
+    graph_library_dir = args.input_data
+    graph_factory, max_nodes, max_colors, graph_count = load_graph_library(graph_library_dir)
     nodes = max_nodes
     colors = max_colors
 
@@ -314,7 +256,7 @@ if __name__ == "__main__":
     print(f"Using actor_device={actor_device}, critic_device={critic_device}")
     print(
         f"Training graph source: library ({graph_library_dir}), "
-        f"graphs={graph_count}, max_nodes={max_nodes}, max_colors={max_colors}, graph_seed={args.graph_seed}"
+        f"graphs={graph_count}, max_nodes={max_nodes}, max_colors={max_colors}"
     )
     sys.stdout.flush()
 
@@ -378,7 +320,7 @@ if __name__ == "__main__":
         f"stagnation_penalty={args.stagnation_penalty}\nreward_scale={args.reward_scale}\nactor_lr={actor_lr}\ncritic_lr={critic_lr}\n"
         f"actor_device={actor_device}\ncritic_device={critic_device}\n"
         f"graph_library_dir={graph_library_dir}\n"
-        f"graph_count={graph_count}\ngraph_seed={args.graph_seed}",
+        f"graph_count={graph_count}",
     )
     logger = TensorboardLogger(writer, train_interval=1, update_interval=1)
 
