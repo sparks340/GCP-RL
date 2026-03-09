@@ -173,7 +173,7 @@ python runner.py test_graph.txt \
 
 数据分两类：
 
-- `random`：纯随机 Erdos-Renyi 图，节点数默认在 `60-120` 间随机采样，边概率默认取 `0.1/0.5/0.9`，每个概率配置独立随机生成 20 次，颜色数默认取 `nodes // 5`
+- `random`：纯随机 Erdos-Renyi 图，节点数默认在 `60-120` 间随机采样，边概率默认取 `0.1/0.3/0.5`，每个概率配置独立随机生成 20 次，颜色数按概率规则计算
 - `dsjc`：`data/` 中实际存在的 DSJC 图，颜色数来自 `data/ReadMe.txt`
 
 默认输出目录：`results/benchmark_compare/`
@@ -198,7 +198,7 @@ python runner.py test_graph.txt \
   --random-instances-per-config 20 \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
-  --random-probabilities 0.1 0.5 0.9 \
+  --random-probabilities 0.1 0.3 0.5 \
   --max-steps-rl 300 \
   --output-dir results/benchmark_compare_sa
 ```
@@ -213,7 +213,7 @@ python runner.py test_graph.txt \
   --random-instances-per-config 20 \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
-  --random-probabilities 0.1 0.5 0.9 \
+  --random-probabilities 0.1 0.3 0.5 \
   --max-steps-rl 300 \
   --output-dir results/benchmark_compare_tabu
 ```
@@ -239,7 +239,7 @@ python runner.py test_graph.txt \
   --include-random \
   --random-min-nodes 60 \
   --random-max-nodes 120 \
-  --random-probabilities 0.1 0.5 0.9 \
+  --random-probabilities 0.1 0.3 0.5 \
   --output-dir results/benchmark_compare_random
 ```
 
@@ -271,7 +271,7 @@ smoke test：
 
 说明：
 
-- 随机图颜色数默认是 `nodes // 5`。
+- 随机图颜色数按概率规则：`p=0.1 -> k=max(3, n//25+1)`、`p=0.3 -> k=max(4, n//15+1)`、`p=0.5 -> k=max(6, n//7-1)`。
 - DSJC 图颜色数取自 `data/ReadMe.txt`。
 - `--max-steps-rl` 表示 RL 先运行多少步，然后接一次局部搜索并结束该实例。
 
