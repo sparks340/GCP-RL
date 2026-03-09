@@ -48,7 +48,7 @@ e <u> <v>
 
 ```bash
 python scripts/generate_training_data.py \
-  --output-dir data/library_train \
+  --output-dir data/train_data \
   --distribution 0.1:120,0.3:140,0.5:40 \
   --node-ranges 40-60:80,60-90:140,90-120:80
 ```
@@ -59,13 +59,14 @@ python scripts/generate_training_data.py \
 python trainer.py checkpoints/policy_library.pth \
   --model-type gnn \
   --search-algorithm sa \
-  --graph-library-dir data/library_train
+  --traindata data/train_data
 ```
 
 说明：
 
 - 训练时每个 episode 会从图库中随机抽样图。
 - 图库目录需包含 `.col` 与 `ReadMe.txt`，颜色数自动按 `ReadMe.txt` 加载。
+- 默认路径：若不传 `--traindata`，启动时会提示输入目录，回车默认 `data/train_data`。
 - 推荐生成配置：
   - 概率分布：`p=0.1:120`、`p=0.3:140`、`p=0.5:40`
   - 节点区间分布：`40~60:80`、`60~90:140`、`90~120:80`
@@ -81,7 +82,7 @@ python trainer.py checkpoints/policy_v2.pth \
   --input checkpoints/policy_library.pth \
   --model-type gnn \
   --search-algorithm sa \
-  --graph-library-dir data/library_train
+  --traindata data/train_data
 ```
 
 ### `trainer.py` 参数
@@ -96,7 +97,7 @@ python trainer.py checkpoints/policy_v2.pth \
 - 并行环境：`--train-env-num`、`--test-env-num`
 - PPO 采样：`--step-per-epoch`、`--step-per-collect`、`--repeat-per-collect`、`--batch-size`、`--episode-per-test`
 - 图与采样：
-  - 图库图：`--graph-library-dir`
+  - 图库图：`--traindata`
 - 奖励与优化：`--beta`、`--stagnation-penalty`（仅惩罚真 no-op）、`--reward-scale`、`--actor-lr`、`--critic-lr`、`--lr`（兼容旧参数） 、`--vf-coef`、`--ent-coef`
 - 设备：`--device {auto,cpu,cuda}`、`--split-gpus`、`--actor-device`、`--critic-device`
 - 图采样与随机种子：`--graph-seed`

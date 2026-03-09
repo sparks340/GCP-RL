@@ -116,18 +116,13 @@ def parse_graph_metadata(name: str):
     )
 
 
-def load_graph_library(data_dir, seed=None):
-    data_dir = Path(data_dir)
-    readme_path = data_dir / "ReadMe.txt"
-    if not readme_path.exists():
-        raise FileNotFoundError(f"ReadMe.txt not found under graph library: {data_dir}")
 
 
 def resolve_graph_library_dir(data_dir):
     requested = Path(data_dir)
     candidates = [requested]
     if requested.name == "data":
-        candidates.append(requested / "library_train")
+        candidates.append(requested / "train_data")
 
     existing_with_readme = [c for c in candidates if (c / "ReadMe.txt").exists()]
     if existing_with_readme:
@@ -137,9 +132,17 @@ def resolve_graph_library_dir(data_dir):
     raise FileNotFoundError(
         "ReadMe.txt not found in graph library path candidates: "
         f"{candidate_text}. "
-        "Please either set --graph-library-dir to a valid library directory, "
+        "Please set --traindata to a valid library directory, "
         "or generate one via scripts/generate_training_data.py."
     )
+
+
+def resolve_cli_graph_library_dir(args):
+    if args.traindata:
+        return args.traindata
+
+    entered = input("请输入训练图库目录（包含 ReadMe.txt 和 .col，默认 data/train_data）: ").strip()
+    return entered or "data/train_data"
 
 def load_graph_library(data_dir, seed=None):
     data_dir = resolve_graph_library_dir(data_dir)
@@ -215,13 +218,14 @@ if __name__ == "__main__":
     parser.add_argument("--actor-device", type=str, default=None, help="Override actor device, e.g. cuda:0")
     parser.add_argument("--critic-device", type=str, default=None, help="Override critic device, e.g. cuda:1")
     parser.add_argument("--graph-seed", type=int, default=None, help="Random seed for graph generation")
-    parser.add_argument("--graph-library-dir", type=str, default="data/library_train", help="Directory containing .col files and ReadMe.txt")
+    parser.add_argument("--traindata", type=str, default=None, help="Training graph library directory containing .col files and ReadMe.txt")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps_RL)
 
+    graph_library_dir = resolve_cli_graph_library_dir(args)
     graph_factory, max_nodes, max_colors, graph_count = load_graph_library(
-        args.graph_library_dir,
+        graph_library_dir,
         args.graph_seed,
     )
     nodes = max_nodes
@@ -282,7 +286,7 @@ if __name__ == "__main__":
 
     print(f"Using actor_device={actor_device}, critic_device={critic_device}")
     print(
-        f"Training graph source: library ({args.graph_library_dir}), "
+        f"Training graph source: library ({graph_library_dir}), "
         f"graphs={graph_count}, max_nodes={max_nodes}, max_colors={max_colors}, graph_seed={args.graph_seed}"
     )
     sys.stdout.flush()
@@ -346,7 +350,7 @@ if __name__ == "__main__":
         f"sa_iters={args.sa_iters}\ntabu_iters={args.tabu_iters}\nbeta={args.beta}\n"
         f"stagnation_penalty={args.stagnation_penalty}\nreward_scale={args.reward_scale}\nactor_lr={actor_lr}\ncritic_lr={critic_lr}\n"
         f"actor_device={actor_device}\ncritic_device={critic_device}\n"
-        f"graph_library_dir={args.graph_library_dir}\n"
+        f"graph_library_dir={graph_library_dir}\n"
         f"graph_count={graph_count}\ngraph_seed={args.graph_seed}",
     )
     logger = TensorboardLogger(writer, train_interval=1, update_interval=1)
