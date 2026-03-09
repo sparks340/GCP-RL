@@ -98,6 +98,21 @@ def parse_dsjc_readme(readme_path):
                 mapping[parts[0]] = int(parts[1])
     return mapping
 
+    candidate_text = ", ".join(str(c) for c in candidates)
+    raise FileNotFoundError(
+        "ReadMe.txt not found in graph library path candidates: "
+        f"{candidate_text}. "
+        "Please set --traindata to a valid library directory, "
+        "or generate one via scripts/generate_training_data.py."
+    )
+
+
+def resolve_cli_graph_library_dir(args):
+    if args.traindata:
+        return args.traindata
+
+    entered = input("请输入训练图库目录（包含 ReadMe.txt 和 .col，默认 data/train_data）: ").strip()
+    return entered or "data/train_data"
 
 def parse_graph_metadata(name: str):
     stem = name[:-4] if name.endswith(".col") else name
@@ -136,6 +151,22 @@ def resolve_graph_library_dir(data_dir):
         "or generate one via scripts/generate_training_data.py."
     )
 
+    color_map = parse_dsjc_readme(readme_path)
+    graph_records = []
+    max_nodes = 0
+    max_colors = 1
+
+    for dataset_name, colors in color_map.items():
+        graph_path = data_dir / f"{dataset_name}.col"
+        if not graph_path.exists():
+            continue
+        nodes = parse_graph_metadata(dataset_name)
+        graph_records.append((graph_path, nodes, int(colors)))
+        max_nodes = max(max_nodes, nodes)
+        max_colors = max(max_colors, int(colors))
+
+    if not graph_records:
+        raise ValueError(f"No valid .col graphs found under {data_dir}")
 
 def resolve_cli_graph_library_dir(args):
     return args.input_data

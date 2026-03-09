@@ -66,7 +66,7 @@ python trainer.py checkpoints/policy_library.pth \
 
 - 训练时每个 episode 会从图库中随机抽样图。
 - 图库目录需包含 `.col` 与 `ReadMe.txt`，颜色数自动按 `ReadMe.txt` 加载。
-- 默认路径：`--input_data` 默认即为 `data/train_data`（非交互，无需手动输入）。
+- 默认路径：`--input_data` 默认即为 `data/train_data`。
 - 推荐生成配置：
   - 概率分布：`p=0.1:120`、`p=0.3:140`、`p=0.5:40`
   - 节点区间分布：`40~60:80`、`60~90:140`、`90~120:80`
