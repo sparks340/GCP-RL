@@ -116,6 +116,11 @@ def parse_graph_metadata(name: str):
     )
 
 
+def load_graph_library(data_dir, seed=None):
+    data_dir = Path(data_dir)
+    readme_path = data_dir / "ReadMe.txt"
+    if not readme_path.exists():
+        raise FileNotFoundError(f"ReadMe.txt not found under graph library: {data_dir}")
 
 
 def resolve_graph_library_dir(data_dir):
