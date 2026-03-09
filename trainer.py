@@ -122,6 +122,29 @@ def load_graph_library(data_dir, seed=None):
     if not readme_path.exists():
         raise FileNotFoundError(f"ReadMe.txt not found under graph library: {data_dir}")
 
+
+def resolve_graph_library_dir(data_dir):
+    requested = Path(data_dir)
+    candidates = [requested]
+    if requested.name == "data":
+        candidates.append(requested / "library_train")
+
+    existing_with_readme = [c for c in candidates if (c / "ReadMe.txt").exists()]
+    if existing_with_readme:
+        return existing_with_readme[0]
+
+    candidate_text = ", ".join(str(c) for c in candidates)
+    raise FileNotFoundError(
+        "ReadMe.txt not found in graph library path candidates: "
+        f"{candidate_text}. "
+        "Please either set --graph-library-dir to a valid library directory, "
+        "or generate one via scripts/generate_training_data.py."
+    )
+
+def load_graph_library(data_dir, seed=None):
+    data_dir = resolve_graph_library_dir(data_dir)
+    readme_path = data_dir / "ReadMe.txt"
+
     color_map = parse_dsjc_readme(readme_path)
     graph_records = []
     max_nodes = 0
@@ -192,7 +215,7 @@ if __name__ == "__main__":
     parser.add_argument("--actor-device", type=str, default=None, help="Override actor device, e.g. cuda:0")
     parser.add_argument("--critic-device", type=str, default=None, help="Override critic device, e.g. cuda:1")
     parser.add_argument("--graph-seed", type=int, default=None, help="Random seed for graph generation")
-    parser.add_argument("--graph-library-dir", type=str, default="data", help="Directory containing DSJC .col files and ReadMe.txt")
+    parser.add_argument("--graph-library-dir", type=str, default="data/library_train", help="Directory containing .col files and ReadMe.txt")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps_RL)
