@@ -101,20 +101,13 @@ def parse_dsjc_readme(readme_path):
 
 def resolve_graph_library_dir(data_dir):
     requested = Path(data_dir)
-    candidates = [requested]
-    if requested.name == "data":
-        candidates.append(requested / "train_data")
+    if (requested / "ReadMe.txt").exists():
+        return requested
 
-    existing_with_readme = [c for c in candidates if (c / "ReadMe.txt").exists()]
-    if existing_with_readme:
-        return existing_with_readme[0]
-
-    candidate_text = ", ".join(str(c) for c in candidates)
     raise FileNotFoundError(
-        "ReadMe.txt not found in graph library path candidates: "
-        f"{candidate_text}. "
-        "Please set --input_data to a valid library directory, "
-        "or generate one via scripts/generate_training_data.py."
+        "ReadMe.txt not found in graph library directory: "
+        f"{requested}. "
+        "Please set --input_data to a valid library directory."
     )
 
 
@@ -190,7 +183,7 @@ if __name__ == "__main__":
     parser.add_argument("--split-gpus", action="store_true", help="Split actor/critic across cuda:0 and cuda:1 when available")
     parser.add_argument("--actor-device", type=str, default=None, help="Override actor device, e.g. cuda:0")
     parser.add_argument("--critic-device", type=str, default=None, help="Override critic device, e.g. cuda:1")
-    parser.add_argument("--input_data", type=str, default="data/train_data", help="Training graph library directory containing .col files and ReadMe.txt")
+    parser.add_argument("--input_data", type=str, default="data", help="Training graph library directory containing .col files and ReadMe.txt")
     args = parser.parse_args()
 
     gym.register(id="GcpEnvMaxIters-v0", entry_point="gcp_env.gcp_env:GcpEnv", max_episode_steps=args.max_steps_RL)
